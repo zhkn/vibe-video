@@ -187,6 +187,7 @@ a { color: var(--accent); text-decoration: none; }
 .shot-scores .score-pip.high { background: var(--green); }
 .shot-scores .score-pip.low { background: var(--danger); }
 .shot-objects { font-size: 11px; color: var(--text2); margin-top: 6px; }
+.shot-actions { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
 
 /* Responsive */
 @media (max-width: 768px) {
@@ -418,6 +419,7 @@ function renderProject(data) {
     </div>`;
   }
   if (data.shots && data.shots.shots && data.shots.shots.length > 0) {
+    window._currentShots = data.shots.shots;
     analysisHtml += renderShots(data.shots);
   } else if (data.analysis && data.analysis.length > 0) {
     analysisHtml += '<div class="json-view">' + syntaxHighlight(JSON.stringify(data.analysis, null, 2)) + '</div>';
@@ -1035,11 +1037,68 @@ function renderShots(shotsData) {
         </div>
         ${(s.garden_objects||[]).length > 0 || (s.actions||[]).length > 0 ?
           `<div class="shot-objects">🏷️ ${[...(s.garden_objects||[]), ...(s.actions||[])].join(' · ')}</div>` : ''}
+        <div class="shot-actions">
+          <button class="btn" style="font-size:11px;padding:3px 8px" onclick="setShotAsRole('${esc(s.source||'')}', ${(s.start||0)}, ${(s.end||0)}, 'opening')">🎯 设为开头</button>
+          <button class="btn" style="font-size:11px;padding:3px 8px" onclick="setShotAsRole('${esc(s.source||'')}', ${(s.start||0)}, ${(s.end||0)}, 'result')">🖼️ 设为封面</button>
+          <button class="btn" style="font-size:11px;padding:3px 8px" onclick="previewShot('${esc(s.source||'')}', ${(s.start||0)}, ${(s.end||0)})">▶ 预览</button>
+          <button class="btn" style="font-size:11px;padding:3px 8px;color:var(--danger)" onclick="markShotDelete('${esc(s.shot_id||'')}')">🗑️ 标记删除</button>
+        </div>
       </div>`;
     });
     html += '</div>';
   }
   return html;
+}
+
+function setShotAsRole(source, start, end, role) {
+  // 将 shot 添加到剪辑计划中指定角色位置
+  if (!window._currentPlan) {
+    showToast('⚠️ 请先生成剪辑计划');
+    return;
+  }
+  const clip = {
+    role: role,
+    source: source,
+    start: start,
+    end: end,
+    duration: end - start,
+    caption: '',
+    note: `从镜头评分面板设置为 ${role}`,
+  };
+  // 替换或添加
+  const plan = window._currentPlan;
+  const idx = plan.clips.findIndex(c => c.role === role);
+  if (idx >= 0) {
+    plan.clips[idx] = {...plan.clips[idx], ...clip};
+  } else {
+    plan.clips.push(clip);
+  }
+  // 重新计算 timeline
+  let t = 0;
+  plan.clips.forEach(c => { c.timeline_start = t; c.timeline_end = t + (c.duration||0); t += (c.duration||0); });
+  plan.actual_duration = t;
+  // 刷新编辑计划视图
+  document.getElementById('tc-edit-plan').innerHTML = renderEditPlan(plan);
+  showToast(`✅ 已设置 ${role} 片段`);
+}
+
+function previewShot(source, start, end) {
+  // 打开预览弹窗
+  const url = `${API}/api/video/${currentProject}/${source}`;
+  const lightbox = document.getElementById('lightbox');
+  lightbox.innerHTML = `<video src="${url}#t=${start},${end}" controls autoplay style="max-width:90vw;max-height:90vh;border-radius:8px"></video>
+    <div style="color:white;text-align:center;margin-top:8px">${source} ${start.toFixed(1)}s → ${end.toFixed(1)}s</div>`;
+  lightbox.classList.add('show');
+  lightbox.onclick = function(e) { if (e.target === lightbox) { lightbox.classList.remove('show'); lightbox.innerHTML = '<img id="lightboxImg" src="">'; lightbox.onclick = closeLightbox; } };
+}
+
+function markShotDelete(shotId) {
+  showToast(`🗑️ 已标记 ${shotId} 为删除`);
+  // 在 shots 数据中标记
+  if (window._currentShots) {
+    const shot = window._currentShots.find(s => s.shot_id === shotId);
+    if (shot) { shot.delete = true; shot.delete_reason = '用户标记删除'; }
+  }
 }
 
 function renderScoreBar(scores, keys) {
