@@ -1855,6 +1855,8 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
                 "source_has_audio": info.get("has_audio", False),
                 "timeline_start": timeline_pos,
                 "timeline_end": timeline_pos + dur,
+                "shot_id": clip.get("shot_id", ""),
+                "alternatives": clip.get("alternatives", []),
             })
             timeline_pos += dur
 
@@ -1969,6 +1971,15 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
                 used_sources.add(shot.get("source", ""))
 
     raw_dir = os.path.join(date_dir, "raw")
+
+    # 构建 alternatives 索引：按 source 分组，每个 shot 知道同源的其他候选
+    by_source = {}
+    for s in shots:
+        if s.get("delete"):
+            continue
+        src = s.get("source", "")
+        by_source.setdefault(src, []).append(s.get("shot_id", ""))
+
     plan_clips = []
     timeline_pos = 0.0
     for i, shot in enumerate(selected):
@@ -1979,6 +1990,23 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
         info = get_video_info(src_path)
         dur = float(shot.get("duration", shot.get("end", 10) - shot.get("start", 0)))
         role = STORY_SLOTS[i % len(STORY_SLOTS)]["role"] if i < len(STORY_SLOTS) else "action"
+
+        # alternatives: 同源的其他 shot + 同推荐用途的其他 shot
+        alt_ids = set()
+        # 同源其他 shot
+        for sid in by_source.get(src_name, []):
+            if sid and sid != shot.get("shot_id"):
+                alt_ids.add(sid)
+        # 同推荐用途的其他 shot（不同 source）
+        use = _role_to_use(role)
+        for s in shots:
+            if s.get("delete"):
+                continue
+            if s.get("shot_id") == shot.get("shot_id"):
+                continue
+            if use in s.get("recommended_use", []):
+                alt_ids.add(s.get("shot_id", ""))
+        alt_ids.discard("")
 
         # 剪辑意图：基于 shot 数据自动生成
         ps = shot.get("platform_scores", {})
@@ -2036,6 +2064,7 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
             edit_style = "fade"
 
         plan_clips.append({
+            "shot_id": shot.get("shot_id", ""),
             "role": role,
             "source": src_name,
             "source_path": src_path,
@@ -2054,6 +2083,8 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
             "why_selected": why_selected,
             "risk": risk,
             "platform_goal": platform_goal,
+            # 备选方案
+            "alternatives": sorted(alt_ids)[:5],
         })
         timeline_pos += dur
 

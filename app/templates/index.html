@@ -755,6 +755,7 @@ function renderEditPlan(plan) {
           ${c.platform_goal ? `<div class="edit-row"><label>📊</label><span style="font-size:11px;color:var(--accent3)">${esc(c.platform_goal)}</span></div>` : ''}
           ${c.risk ? `<div class="edit-row"><label>⚠️</label><span style="font-size:11px;color:var(--warn)">${esc(c.risk)}</span></div>` : ''}
           ${c.edit_style && c.edit_style !== 'normal' ? `<div class="edit-row"><label>🎨</label><span style="font-size:11px;color:var(--text2)">风格: ${esc(c.edit_style)}</span></div>` : ''}
+          ${c.alternatives && c.alternatives.length ? `<div class="edit-row"><label>🔄</label><span style="font-size:11px;color:var(--text2)">备选: ${c.alternatives.map(a=>esc(a)).join(', ')}</span></div>` : ''}
           <span class="preview-toggle" onclick="togglePreview(this, '${srcUrl}', ${startT}, ${endT})">▶ 预览此片段</span>
           <div class="clip-preview" id="preview-${i}"></div>
         </div>

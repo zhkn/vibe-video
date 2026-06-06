@@ -92,6 +92,7 @@ class VideoTemplateDecision(BaseModel):
 
 class EditClip(BaseModel):
     """edit_plan.json 中的每个 clip"""
+    shot_id: str = Field("", description="对应的 shot ID")
     role: str = Field("action", description="故事角色")
     source: str = Field("", description="源视频文件名")
     source_path: str = Field("", description="源文件完整路径")
@@ -110,6 +111,7 @@ class EditClip(BaseModel):
     why_selected: str = Field("", description="为什么选这个 shot")
     risk: str = Field("", description="潜在风险提示")
     platform_goal: str = Field("", description="平台目标")
+    alternatives: list[str] = Field(default_factory=list, description="备选 shot ID 列表")
 
 
 class EditPlan(BaseModel):
