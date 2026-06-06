@@ -1,32 +1,48 @@
-# 🌿 Vibe Video — AI 驱动的自动视频剪辑系统
+# 🌿 Vibe Video — AI 剪辑导演
 
-> iPhone 拍摄 → 自动归档 → AI 分析 → 一键生成可发布短视频
+> 当前版本：**v3.0** — 从"视频剪辑器"进化为"短视频发布助理"
 
-## ✨ 核心特性
+iPhone 拍摄 → 片段级理解 → 智能编排 → 一键生成可发布短视频
 
-- **一键全流程**：8 阶段 Pipeline，从原始视频到成品输出
-- **AI 智能分析**：多模态视觉分析 + 语音转字幕 + 智能剧情生成
-- **Web UI 可视化**：暗色主题 SPA，实时进度追踪，可视化编辑剧本和剪辑计划
-- **故事驱动剪辑**：9 种故事角色自动编排（开场空镜 → 核心动作 → 收尾空镜）
-- **人机协作**：支持手动编辑剧本、调整片段、重新渲染
-- **灵活配置**：自定义目标时长（30s ~ 3min）、主题、AI 模型
+## ✨ v3.0 核心能力
+
+| 能力 | 说明 |
+|------|------|
+| **片段级素材理解** | 每个视频切出多个候选 shots，不是"一个视频一个结论" |
+| **8 维平台评分** | hook / retention / action / beauty / clarity / contrast / story_value / cover_value |
+| **自动模板选择** | 整理前后对比 / 花园日记 / 教程 / 治愈片 / 问题解决型 |
+| **可解释剪辑决策** | edit_plan 含 why_selected / platform_goal / risk / alternatives |
+| **发布包生成** | 标题候选 / 封面文字 / 话题标签 / 评论引导 / 平台备注 |
+| **双模式渲染** | 草稿 (720p 快速审片) / 发布 (1080p 正式版) |
+| **反馈闭环** | 记录发布数据，按模板类型分析周报，持续优化 |
+| **镜头评分面板** | UI 中直接设为开头/封面/预览/删除，比编辑 JSON 快 10 倍 |
 
 ## 🏗️ 系统架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     浏览器 Web UI                            │
-│          (暗色主题 SPA, SSE 实时进度, 可视化编辑)              │
+│    素材 · 片段分析 · 镜头评分 · 剧本 · 剪辑计划 · 发布包 · 输出  │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP / SSE
 ┌──────────────────────────▼──────────────────────────────────┐
-│                    Flask 后端 (server.py)                     │
-├─────────────────────────────────────────────────────────────┤
-│  Pipeline 8 阶段:                                            │
-│  导入 → 抽帧 → 拼图 → 视觉分析 → 转写 → 剧本 → 编辑计划 → 渲染 │
-├─────────────────────────────────────────────────────────────┤
-│  外部工具: ffmpeg · Whisper · mimo-v2.5 · mimo-v2.5-pro      │
-└─────────────────────────────────────────────────────────────┘
+│              Flask 后端 (server.py ~2700 行)                  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 10 阶段 Pipeline                                       │  │
+│  │ 导入 → 抽帧 → 拼图+索引 → 片段分析 → 转写              │  │
+│  │ → 模板选择 → 剧本 → 剪辑计划 → 渲染 → 发布包 → 反馈    │  │
+│  └───────────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ Pydantic 校验层 (schemas.py)                           │  │
+│  │ ShotAnalysis · PlatformScores · EditPlan · PublishPack │  │
+│  └───────────────────────────────────────────────────────┘  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ 安全层: 路径校验 · 项目级锁 · 统一错误码 · 原子写入     │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────┬──────────┬──────────┬──────────┬──────────────────────┘
+      │          │          │          │
+   ffmpeg     Whisper    mimo API    JSON 文件
+   ffprobe    (本地)    (多模态)    (持久化存储)
 ```
 
 ## 📦 快速开始
@@ -40,30 +56,30 @@
 ### 安装
 
 ```bash
-# 克隆项目
 git clone <repo-url>
 cd vibe-video
-
-# 安装依赖
-make install
-# 或
 pip install -r requirements.txt
+```
 
-# 配置环境变量
-cp .env.example .env
-# 编辑 .env 填入 API key
+### 配置
+
+API Key 从 `~/.hermes/.env` 自动加载，或手动设置：
+
+```bash
+export XIAOMI_API_KEY=your_key
+export XIAOMI_BASE_URL=your_base_url
 ```
 
 ### 启动
 
 ```bash
-# 方式一: Makefile
+# 方式一
 make run
 
-# 方式二: 启动脚本
-./scripts/start.sh --port 8766
+# 方式二
+python -m app.server --port 8766
 
-# 方式三: 直接运行
+# 方式三
 python -m app.server --port 8766 --data-dir ~/Movies/GardenAutoCut
 ```
 
@@ -76,97 +92,87 @@ python -m app.server --port 8766 --data-dir ~/Movies/GardenAutoCut
 3. **选择项目**：左侧选择日期项目
 4. **设置参数**：输入主题、选择目标时长
 5. **一键生成**：点击「🚀 一键全流程」
-6. **编辑调整**：在「剧本」和「剪辑计划」标签页中编辑
-7. **重新渲染**：调整满意后点击「🎬 渲染输出」
+6. **镜头评分**：在「片段分析」标签页中审片、设为开头/封面
+7. **编辑调整**：在「剧本」和「剪辑计划」标签页中编辑
+8. **草稿预览**：点击「📝 草稿渲染」快速审片
+9. **正式渲染**：点击「🎬 发布渲染」生成 1080p 成品
+10. **发布包**：在「发布包」标签页获取标题/封面/话题/平台备注
+11. **记录数据**：发布后回填播放/点赞/评论，系统持续学习
 
-## 📋 8 阶段 Pipeline
+## 📋 10 阶段 Pipeline
 
-| 阶段 | 名称 | 说明 | 工具 |
-|------|------|------|------|
-| 1 | **视频导入** | 扫描 Inbox，按拍摄日期自动归档 | ffprobe |
-| 2 | **关键帧抽取** | 固定间隔 + 场景变化检测 | ffmpeg |
-| 3 | **Contact Sheet** | 关键帧拼成网格图 | Pillow |
-| 4 | **视觉分析** | AI 识别画面内容、动作、角色 | mimo-v2.5 |
-| 5 | **音频转字幕** | 提取音频 → Whisper 语音识别 | Whisper |
-| 6 | **剧情脚本** | 融合视觉+字幕，生成故事脚本 | mimo-v2.5-pro |
-| 7 | **编辑计划** | 从脚本生成可渲染的时间线 | Python |
-| 8 | **视频渲染** | 裁剪拼接、字幕烧录、封面生成 | ffmpeg |
+| 阶段 | 名称 | 说明 | 输出文件 |
+|------|------|------|---------|
+| 1 | **视频导入** | 扫描 Inbox，按日期+主题归档 | `raw/` |
+| 2 | **关键帧抽取** | 固定间隔 + 场景变化检测 | `keyframes/` |
+| 3 | **Contact Sheet** | 拼图 + 时间戳叠加 + 帧索引 | `contact_sheets/` + `frame_index.json` |
+| 4 | **片段级分析** | 每个视频切多个候选 shots，8 维平台评分 | `shots.json` |
+| 5 | **音频转字幕** | Whisper 语音识别 | `transcription.json` |
+| 5.5 | **模板选择** | 自动判断最适合的视频模板 | `video_template.json` |
+| 6 | **剧情脚本** | 按推荐用途分组，AI 编排故事线 | `story_script.json` |
+| 7 | **编辑计划** | 含剪辑意图 (why_selected / risk / alternatives) | `edit_plan.json` |
+| 8 | **视频渲染** | 草稿 720p / 发布 1080p，concat 前 ffprobe 校验 | `outputs/` |
+| 9 | **发布包** | 标题候选 / 封面字 / 话题 / 评论引导 / 平台备注 | `publish_pack.json` |
+| 10 | **反馈闭环** | 记录发布数据，周报分析 | `performance.json` |
+
+## 🎯 平台评分 (8 维)
+
+| 字段 | 权重 | 说明 |
+|------|------|------|
+| hook | 0.18 | 是否适合前 3 秒 |
+| retention | 0.18 | 能否维持停留 |
+| action | 0.16 | 是否有动作变化 |
+| story_value | 0.16 | 是否推动故事 |
+| beauty | 0.12 | 花草画面是否美 |
+| clarity | 0.10 | 观众能不能一眼看懂 |
+| contrast | 0.07 | 是否有前后变化 |
+| cover_value | 0.03 | 是否适合做封面 |
+
+## 🎬 5 种视频模板
+
+| 模板 | 适用场景 |
+|------|---------|
+| `before_after` | 整理前后对比 |
+| `garden_diary` | 花园日记，多动作片段拼接 |
+| `tutorial` | 种植/养护教程 |
+| `healing_mood` | 治愈氛围片 |
+| `one_problem` | 一个问题解决型 |
 
 ## 📁 项目结构
 
 ```
 vibe-video/
-├── README.md              # 项目说明
-├── LICENSE                # MIT 许可证
-├── pyproject.toml         # 项目配置
-├── requirements.txt       # Python 依赖
-├── Makefile               # 常用命令
-├── .gitignore
-├── .env.example           # 环境变量模板
-├── app/                   # 主应用
-│   ├── __init__.py
-│   ├── server.py          # Flask 后端 (8 阶段 Pipeline + API)
+├── README.md
+├── requirements.txt
+├── Makefile
+├── app/
+│   ├── server.py          # Flask 后端 (10 阶段 Pipeline + API)
+│   ├── schemas.py         # Pydantic 数据模型
+│   ├── json_utils.py      # JSON 校验 + 原子写入 + AI 输出解析
 │   └── templates/
-│       └── index.html     # Web UI 前端
-├── scripts/               # 工具脚本
-│   ├── start.sh           # 启动脚本
-│   └── garden_autoedit_mvp.py  # MVP 版本 (独立脚本)
-├── docs/                  # 文档
+│       └── index.html     # Web UI 前端 (镜头评分面板)
+├── tests/                 # 最小测试集
+│   ├── test_safety.py     # 路径安全 + 并发锁
+│   ├── test_schemas.py    # JSON 契约校验
+│   └── fixtures/          # 无 AI 测试数据
+├── scripts/
+├── docs/
 │   ├── architecture.md    # 技术架构详解
-│   ├── api.md             # API 接口文档
-│   └── changelog.md       # 开发日志
-└── data/                  # 数据目录 (gitignored)
-    └── .gitkeep
-```
-
-## ⚙️ 配置说明
-
-### 环境变量
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `OPENAI_API_KEY` | OpenAI API Key (Whisper) | - |
-| `OPENAI_BASE_URL` | OpenAI API 地址 | `https://api.openai.com/v1` |
-| `CUSTOM_API_KEY` | 自定义 LLM API Key | - |
-| `CUSTOM_BASE_URL` | 自定义 LLM API 地址 | - |
-| `VISUAL_MODEL` | 视觉分析模型 | `mimo-v2.5` |
-| `TEXT_MODEL` | 文本生成模型 | `mimo-v2.5-pro` |
-| `WHISPER_MODEL` | Whisper 模型大小 | `base` |
-
-### 数据目录结构
-
-```
-~/Movies/GardenAutoCut/
-├── Inbox/                 # 放入待处理视频
-└── 2026-06-05/           # 按日期归档的项目
-    ├── raw/               # 原始视频
-    ├── keyframes/         # 抽取的关键帧
-    ├── contact_sheets/    # 拼图
-    ├── audio/             # 提取的音频
-    ├── analysis.json      # 视觉分析结果
-    ├── transcription.json # 转写结果
-    ├── story_script.json  # 剧情脚本
-    ├── edit_plan.json     # 剪辑计划
-    └── outputs/           # 输出文件
-        ├── rough_cut.mp4  # 最终视频
-        ├── captions.srt   # 字幕
-        └── cover.jpg      # 封面
+│   └── ...
+└── data/
 ```
 
 ## 🔧 开发
 
 ```bash
-# 安装开发依赖
-make install-dev
+# 安装依赖
+make install
+
+# 运行测试
+make test
 
 # 代码检查
 make lint
-
-# 代码格式化
-make format
-
-# 开发模式 (自动重载)
-make dev
 ```
 
 ## 📄 许可证
