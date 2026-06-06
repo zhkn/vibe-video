@@ -1736,6 +1736,61 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
         dur = float(shot.get("duration", shot.get("end", 10) - shot.get("start", 0)))
         role = STORY_SLOTS[i % len(STORY_SLOTS)]["role"] if i < len(STORY_SLOTS) else "action"
 
+        # 剪辑意图：基于 shot 数据自动生成
+        ps = shot.get("platform_scores", {})
+        q = shot.get("quality", {})
+        uses = shot.get("recommended_use", [])
+        avg_quality = sum(q.values()) / max(len(q), 1) if q else 6
+
+        # why_selected: 为什么选这个 shot
+        why_parts = []
+        if ps.get("hook", 0) >= 7:
+            why_parts.append("开头吸引力强")
+        if ps.get("action", 0) >= 7:
+            why_parts.append("动作丰富")
+        if ps.get("beauty", 0) >= 7:
+            why_parts.append("画面美感好")
+        if ps.get("story_value", 0) >= 7:
+            why_parts.append("推进故事")
+        if ps.get("contrast", 0) >= 7:
+            why_parts.append("有前后对比")
+        if not why_parts:
+            why_parts.append(f"综合评分 {avg_quality:.0f}/10")
+        why_selected = f"{shot.get('visual_summary', '')}，{'、'.join(why_parts)}"
+
+        # risk: 潜在风险
+        risk = ""
+        if q.get("exposure", 10) <= 4:
+            risk = "曝光不足，建议适当提亮"
+        elif q.get("stability", 10) <= 4:
+            risk = "画面抖动，建议加稳定"
+        elif q.get("clarity", 10) <= 4:
+            risk = "画面模糊，建议缩短使用时长"
+
+        # platform_goal: 这个片段在平台上的目标
+        platform_goal = "提升整体节奏"
+        if "开头" in uses:
+            platform_goal = "前3秒抓住注意力"
+        elif "结尾" in uses:
+            platform_goal = "留有余韵，引导互动"
+        elif "封面" in uses:
+            platform_goal = "吸引点击"
+        elif "中段快切" in uses:
+            platform_goal = "维持观看节奏"
+        elif "情感高潮" in uses:
+            platform_goal = "引发共鸣"
+        elif "细节展示" in uses:
+            platform_goal = "展示精致细节"
+
+        # edit_style: 剪辑风格
+        edit_style = "normal"
+        if ps.get("action", 0) >= 8:
+            edit_style = "fast_cut"
+        elif ps.get("beauty", 0) >= 8 and ps.get("action", 0) <= 4:
+            edit_style = "slow_motion"
+        elif role in ("opening", "ending"):
+            edit_style = "fade"
+
         plan_clips.append({
             "role": role,
             "source": src_name,
@@ -1749,13 +1804,30 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
             "timeline_end": timeline_pos + dur,
             "caption": shot.get("visual_summary", ""),
             "note": f"shot: {shot.get('shot_id', '?')}",
+            # 剪辑意图
+            "edit_style": edit_style,
+            "speed": 1.0,
+            "why_selected": why_selected,
+            "risk": risk,
+            "platform_goal": platform_goal,
         })
         timeline_pos += dur
 
+    # 读取模板信息
+    template_data = load_json("video_template.json") if False else None  # load_json 不在此作用域
+    template_path = os.path.join(date_dir, "video_template.json")
+    if os.path.exists(template_path):
+        with open(template_path, encoding="utf-8") as f:
+            template_data = json.load(f)
+    else:
+        template_data = None
+
     plan = {
-        "version": "auto-plan-v2",
+        "version": "auto-plan-v3",
         "created_at": datetime.datetime.now().isoformat(),
         "title": f"{theme}记录",
+        "video_template": template_data.get("video_template", "one_problem") if template_data else "one_problem",
+        "template_name": template_data.get("template_name", "一个问题解决型") if template_data else "一个问题解决型",
         "raw_dir": raw_dir,
         "target_duration": 66,
         "actual_duration": timeline_pos,

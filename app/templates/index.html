@@ -531,6 +531,9 @@ function renderScript(script) {
           <div class="edit-row">
             <label>💡</label><input class="edit-field" data-field="note" value="${esc(c.note || '')}" placeholder="剪辑说明" style="color:var(--text2)">
           </div>
+          ${c.why_selected ? `<div class="edit-row"><label>🎯</label><span style="font-size:11px;color:var(--accent2)">${esc(c.why_selected)}</span></div>` : ''}
+          ${c.platform_goal ? `<div class="edit-row"><label>📊</label><span style="font-size:11px;color:var(--accent3)">${esc(c.platform_goal)}</span></div>` : ''}
+          ${c.risk ? `<div class="edit-row"><label>⚠️</label><span style="font-size:11px;color:var(--warn)">${esc(c.risk)}</span></div>` : ''}
           <span class="preview-toggle" onclick="togglePreview(this, '${srcUrl}', ${startT}, ${endT})">▶ 预览此片段</span>
           <div class="clip-preview" id="spreview-${i}"></div>
         </div>
@@ -564,6 +567,7 @@ function renderEditPlan(plan) {
     <div class="title">${plan.title || '剪辑计划'}</div>
     <div class="subtitle">${plan.storyline || ''}</div>
     <div style="font-size:13px;color:var(--text2);margin-bottom:16px">
+      ${plan.template_name ? `🎬 模板: <span style="color:var(--accent)">${esc(plan.template_name)}</span> · ` : ''}
       目标时长: ${plan.target_duration}s · 实际时长: <span id="plan-actual-dur">${plan.actual_duration?.toFixed(1)}</span>s · <span id="plan-clip-count">${plan.clips?.length || 0}</span> 个片段
     </div>`;
 
@@ -592,6 +596,10 @@ function renderEditPlan(plan) {
           <div class="edit-row">
             <label>💡</label><input class="edit-field" data-field="note" value="${esc(c.note || '')}" placeholder="备注" style="color:var(--text2)">
           </div>
+          ${c.why_selected ? `<div class="edit-row"><label>🎯</label><span style="font-size:11px;color:var(--accent2)">${esc(c.why_selected)}</span></div>` : ''}
+          ${c.platform_goal ? `<div class="edit-row"><label>📊</label><span style="font-size:11px;color:var(--accent3)">${esc(c.platform_goal)}</span></div>` : ''}
+          ${c.risk ? `<div class="edit-row"><label>⚠️</label><span style="font-size:11px;color:var(--warn)">${esc(c.risk)}</span></div>` : ''}
+          ${c.edit_style && c.edit_style !== 'normal' ? `<div class="edit-row"><label>🎨</label><span style="font-size:11px;color:var(--text2)">风格: ${esc(c.edit_style)}</span></div>` : ''}
           <span class="preview-toggle" onclick="togglePreview(this, '${srcUrl}', ${startT}, ${endT})">▶ 预览此片段</span>
           <div class="clip-preview" id="preview-${i}"></div>
         </div>
