@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌿 Garden AutoCut</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --bg3: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text2: #8b949e;
+  --accent: #58a6ff;
+  --accent2: #3fb950;
+  --accent3: #d2a8ff;
+  --warn: #d29922;
+  --danger: #f85149;
+  --green: #3fb950;
+  --radius: 8px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+a { color: var(--accent); text-decoration: none; }
+
+/* Header */
+.header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+.header h1 { font-size: 20px; font-weight: 600; }
+.header h1 span { color: var(--accent2); }
+.header .back-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: var(--radius); cursor: pointer; font-size: 13px; display: none; }
+.header .back-btn:hover { border-color: var(--accent); color: var(--text); }
+
+/* Main container */
+.container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+/* Project list */
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.project-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; cursor: pointer; transition: all 0.2s; }
+.project-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.project-card .date { font-size: 24px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+.project-card .info { color: var(--text2); font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap; }
+.project-card .info .tag { background: var(--bg3); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.project-card .info .tag.done { background: rgba(63,185,80,0.15); color: var(--green); }
+.project-card .info .tag.pending { background: rgba(210,169,34,0.15); color: var(--warn); }
+
+/* Project detail */
+.project-view { display: none; }
+.project-header { margin-bottom: 24px; }
+.project-header h2 { font-size: 28px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+.project-header .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.theme-input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: var(--radius); font-size: 14px; width: 250px; }
+.theme-input:focus { border-color: var(--accent); outline: none; }
+.btn { padding: 8px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg3); color: var(--text); font-size: 13px; cursor: pointer; transition: all 0.2s; font-weight: 500; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.primary:hover { background: #4090e0; }
+.btn.green { background: var(--green); color: #fff; border-color: var(--green); }
+.btn.green:hover { background: #2ea043; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Progress bar */
+.progress-bar { background: var(--bg3); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 12px; display: none; }
+.progress-bar .fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); transition: width 0.3s; width: 0; }
+.progress-text { font-size: 13px; color: var(--text2); margin-top: 6px; display: none; }
+
+/* Tabs */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; overflow-x: auto; }
+.tab { padding: 10px 20px; font-size: 13px; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: all 0.2s; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Video grid */
+.video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.video-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.video-card video { width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; max-height: 300px; }
+.video-card .meta { padding: 12px; }
+.video-card .meta .name { font-size: 13px; font-weight: 600; margin-bottom: 4px; word-break: break-all; }
+.video-card .meta .detail { font-size: 12px; color: var(--text2); }
+
+/* Keyframe gallery */
+.kf-section { margin-bottom: 24px; }
+.kf-section h3 { font-size: 15px; color: var(--text2); margin-bottom: 12px; }
+.kf-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.kf-thumb { aspect-ratio: 9/16; overflow: hidden; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; position: relative; }
+.kf-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s; }
+.kf-thumb:hover img { transform: scale(1.05); }
+.kf-thumb .idx { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,0.7); color: var(--accent); font-size: 11px; padding: 1px 5px; border-radius: 3px; }
+
+/* Contact sheet */
+.contact-sheet { max-width: 100%; border-radius: var(--radius); border: 1px solid var(--border); }
+
+/* JSON viewer */
+.json-view { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; font-family: 'SF Mono', Monaco, monospace; font-size: 13px; overflow-x: auto; max-height: 600px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+.json-key { color: var(--accent3); }
+.json-string { color: #a5d6ff; }
+.json-number { color: #79c0ff; }
+.json-bool { color: #ff7b72; }
+
+/* Script/story view */
+.script-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.script-card .title { font-size: 20px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+.script-card .subtitle { color: var(--text2); font-size: 14px; margin-bottom: 16px; }
+.script-card .storyline { background: var(--bg3); padding: 12px 16px; border-radius: var(--radius); border-left: 3px solid var(--accent); margin-bottom: 16px; font-style: italic; }
+.script-clips { display: grid; gap: 12px; }
+.script-clip { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: grid; grid-template-columns: 60px 1fr; gap: 12px; }
+.script-clip .role-badge { background: var(--bg); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--accent); font-weight: 600; text-align: center; padding: 4px; }
+.script-clip .clip-info .caption { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.script-clip .clip-info .source { font-size: 12px; color: var(--text2); }
+.script-clip .clip-info .time { font-size: 12px; color: var(--accent2); margin-top: 4px; }
+
+/* Preview */
+.clip-preview { margin-top: 8px; display: none; }
+.clip-preview.show { display: block; }
+.clip-preview video { width: 100%; max-width: 320px; aspect-ratio: 9/16; object-fit: cover; border-radius: 6px; background: #000; }
+.preview-toggle { font-size: 11px; color: var(--accent); cursor: pointer; margin-top: 4px; display: inline-block; }
+.preview-toggle:hover { text-decoration: underline; }
+
+/* Editable fields */
+.edit-field { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 13px; width: 100%; font-family: inherit; }
+.edit-field:focus { border-color: var(--accent); outline: none; }
+.edit-field.sm { width: 80px; display: inline-block; text-align: center; font-family: monospace; }
+.edit-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.edit-row label { font-size: 11px; color: var(--text2); min-width: 30px; }
+.save-bar { position: sticky; bottom: 0; background: var(--bg2); border-top: 1px solid var(--border); padding: 12px 20px; display: flex; gap: 12px; align-items: center; z-index: 10; }
+.save-bar .status { font-size: 13px; color: var(--text2); margin-left: auto; }
+.toast { position: fixed; top: 20px; right: 20px; background: var(--green); color: #fff; padding: 10px 20px; border-radius: var(--radius); font-size: 14px; z-index: 9999; animation: fadeInOut 2s ease; }
+@keyframes fadeInOut { 0%{opacity:0;transform:translateY(-10px)} 10%{opacity:1;transform:translateY(0)} 80%{opacity:1} 100%{opacity:0} }
+
+/* Transcription view */
+.trans-segment { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.trans-segment .time { color: var(--accent); font-size: 12px; font-family: monospace; min-width: 120px; padding-top: 2px; }
+.trans-segment .text { font-size: 14px; }
+
+/* Output view */
+.output-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.output-card video { max-width: 360px; width: 100%; border-radius: var(--radius); margin-bottom: 12px; }
+.output-card .info { color: var(--text2); font-size: 13px; }
+
+/* Empty state */
+.empty { text-align: center; padding: 60px 20px; color: var(--text2); }
+.empty .icon { font-size: 48px; margin-bottom: 16px; }
+.empty .msg { font-size: 15px; }
+
+/* Lightbox */
+.lightbox { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 1000; display: none; align-items: center; justify-content: center; cursor: pointer; }
+.lightbox.show { display: flex; }
+.lightbox img { max-width: 90vw; max-height: 90vh; object-fit: contain; border-radius: 8px; }
+
+/* Loading spinner */
+.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .container { padding: 12px; }
+  .project-grid { grid-template-columns: 1fr; }
+  .video-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .kf-gallery { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); }
+  .project-header .controls { flex-direction: column; }
+  .theme-input { width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <button class="back-btn" id="backBtn" onclick="showProjects()">← 返回</button>
+  <h1>🌿 <span>Garden AutoCut</span></h1>
+</div>
+
+<div class="container">
+  <!-- Project List -->
+  <div id="projectList">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h2 style="font-size:18px;color:var(--text2)">📁 项目列表</h2>
+      <button class="btn" onclick="loadProjects()">🔄 刷新</button>
+    </div>
+    <div class="project-grid" id="projectGrid"></div>
+  </div>
+
+  <!-- Project Detail -->
+  <div id="projectDetail" class="project-view">
+    <div class="project-header">
+      <h2 id="projectTitle"></h2>
+      <div class="controls">
+        <input type="text" class="theme-input" id="themeInput" placeholder="输入视频主题..." value="日常生活记录">
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:13px;color:var(--text2)">⏱️</span>
+          <select class="theme-input" id="durationInput" style="width:80px">
+            <option value="30">30秒</option>
+            <option value="45">45秒</option>
+            <option value="60" selected>60秒</option>
+            <option value="90">90秒</option>
+            <option value="120">2分钟</option>
+            <option value="180">3分钟</option>
+          </select>
+        </div>
+        <button class="btn primary" id="btnFullPipeline" onclick="runFullPipeline()">🚀 一键全流程</button>
+        <button class="btn" onclick="runStage('keyframes')">🎞️ 抽帧</button>
+        <button class="btn" onclick="runStage('visual-analysis')">👁️ 视觉分析</button>
+        <button class="btn" onclick="runStage('transcription')">🎙️ 转字幕</button>
+        <button class="btn" onclick="runStage('story-script')">📝 剧本</button>
+        <button class="btn" onclick="runStage('edit-plan')">📋 剪辑计划</button>
+        <button class="btn green" onclick="runStage('render')">🎬 渲染</button>
+      </div>
+      <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText"></div>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-tab="videos">📹 素材视频</div>
+      <div class="tab" data-tab="keyframes">🎞️ 关键帧</div>
+      <div class="tab" data-tab="contact-sheets">🖼️ Contact Sheet</div>
+      <div class="tab" data-tab="analysis">👁️ 视觉分析</div>
+      <div class="tab" data-tab="transcription">🎙️ 字幕转写</div>
+      <div class="tab" data-tab="script">📝 剧情脚本</div>
+      <div class="tab" data-tab="edit-plan">📋 剪辑计划</div>
+      <div class="tab" data-tab="output">🎬 输出</div>
+    </div>
+
+    <div id="tabContent">
+      <div class="tab-content active" id="tc-videos"></div>
+      <div class="tab-content" id="tc-keyframes"></div>
+      <div class="tab-content" id="tc-contact-sheets"></div>
+      <div class="tab-content" id="tc-analysis"></div>
+      <div class="tab-content" id="tc-transcription"></div>
+      <div class="tab-content" id="tc-script"></div>
+      <div class="tab-content" id="tc-edit-plan"></div>
+      <div class="tab-content" id="tc-output"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" src="">
+</div>
+
+<script>
+const API = '';
+let currentProject = null;
+let progressSSE = null;
+
+// ─── Tab switching ───
+document.getElementById('tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  document.getElementById('tc-' + tab.dataset.tab).classList.add('active');
+});
+
+// ─── Load projects ───
+async function loadProjects() {
+  const res = await fetch(`${API}/api/projects`);
+  const projects = await res.json();
+  const grid = document.getElementById('projectGrid');
+  if (projects.length === 0) {
+    grid.innerHTML = '<div class="empty"><div class="icon">📭</div><div class="msg">暂无项目。<br>将视频放入 ~/Movies/GardenAutoCut/Inbox 后刷新。</div></div>';
+    return;
+  }
+  grid.innerHTML = projects.map(p => `
+    <div class="project-card" onclick="openProject('${p.id}')">
+      <div class="date">📅 ${p.id}</div>
+      <div class="info">
+        <span class="tag">${p.video_count} 个视频</span>
+        <span class="tag ${p.has_analysis ? 'done' : 'pending'}">${p.has_analysis ? '✓ 已分析' : '○ 未分析'}</span>
+        <span class="tag ${p.has_story_script ? 'done' : 'pending'}">${p.has_story_script ? '✓ 有剧本' : '○ 无剧本'}</span>
+        <span class="tag ${p.has_output ? 'done' : 'pending'}">${p.has_output ? '✓ 已输出' : '○ 未渲染'}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ─── Open project ───
+async function openProject(projectId) {
+  currentProject = projectId;
+  document.getElementById('projectList').style.display = 'none';
+  document.getElementById('projectDetail').style.display = 'block';
+  document.getElementById('projectTitle').textContent = '📅 ' + projectId;
+  document.getElementById('backBtn').style.display = 'inline-block';
+
+  const res = await fetch(`${API}/api/projects/${projectId}`);
+  const data = await res.json();
+  renderProject(data);
+}
+
+function showProjects() {
+  document.getElementById('projectList').style.display = 'block';
+  document.getElementById('projectDetail').style.display = 'none';
+  document.getElementById('backBtn').style.display = 'none';
+  if (progressSSE) { progressSSE.close(); progressSSE = null; }
+}
+
+// ─── Render project ───
+function renderProject(data) {
+  // Videos
+  const tc = document.getElementById('tc-videos');
+  if (data.videos && data.videos.length > 0) {
+    tc.innerHTML = '<div class="video-grid">' + data.videos.map(v => `
+      <div class="video-card">
+        <video src="${API}/api/video/${data.id}/${v.filename}" muted preload="metadata" controls></video>
+        <div class="meta">
+          <div class="name">${v.filename}</div>
+          <div class="detail">${v.duration?.toFixed(1)}s · ${v.width}×${v.height} · ${v.size_mb}MB ${v.has_audio ? '🔊' : '🔇'}</div>
+        </div>
+      </div>
+    `).join('') + '</div>';
+  } else {
+    tc.innerHTML = '<div class="empty"><div class="icon">📹</div><div class="msg">暂无素材视频</div></div>';
+  }
+
+  // Keyframes
+  const tk = document.getElementById('tc-keyframes');
+  if (data.keyframes && (data.keyframes.fixed?.length > 0 || data.keyframes.scene?.length > 0)) {
+    let html = '';
+    for (const sub of ['fixed', 'scene']) {
+      const frames = data.keyframes[sub] || [];
+      if (frames.length === 0) continue;
+      html += `<div class="kf-section"><h3>${sub === 'fixed' ? '⏱️ 固定间隔' : '🎬 场景变化'} (${frames.length} 帧)</h3><div class="kf-gallery">`;
+      frames.forEach((f, i) => {
+        html += `<div class="kf-thumb" onclick="showLightbox('${API}/api/keyframe/${data.id}/${sub}/${f}')"><img src="${API}/api/keyframe/${data.id}/${sub}/${f}" loading="lazy"><span class="idx">${i+1}</span></div>`;
+      });
+      html += '</div></div>';
+    }
+    tk.innerHTML = html;
+  } else {
+    tk.innerHTML = '<div class="empty"><div class="icon">🎞️</div><div class="msg">尚未抽取关键帧</div></div>';
+  }
+
+  // Contact sheets
+  const tcs = document.getElementById('tc-contact-sheets');
+  tcs.innerHTML = '<div class="empty"><div class="icon">🖼️</div><div class="msg">运行视觉分析后自动生成</div></div>';
+
+  // Analysis
+  const ta = document.getElementById('tc-analysis');
+  if (data.analysis && data.analysis.length > 0) {
+    ta.innerHTML = '<div class="json-view">' + syntaxHighlight(JSON.stringify(data.analysis, null, 2)) + '</div>';
+  } else {
+    ta.innerHTML = '<div class="empty"><div class="icon">👁️</div><div class="msg">尚未进行视觉分析</div></div>';
+  }
+
+  // Transcription
+  const tt = document.getElementById('tc-transcription');
+  if (data.transcription && data.transcription.length > 0) {
+    let html = '';
+    data.transcription.forEach(t => {
+      html += `<div class="script-card"><div class="title">${t.file}</div>`;
+      if (t.segments && t.segments.length > 0) {
+        t.segments.forEach(s => {
+          html += `<div class="trans-segment"><span class="time">${fmtTime(s.start)} → ${fmtTime(s.end)}</span><span class="text">${s.text}</span></div>`;
+        });
+      } else {
+        html += `<div style="color:var(--text2)">${t.note || '无转写内容'}</div>`;
+      }
+      html += '</div>';
+    });
+    tt.innerHTML = html;
+  } else {
+    tt.innerHTML = '<div class="empty"><div class="icon">🎙️</div><div class="msg">尚未转写字幕</div></div>';
+  }
+
+  // Script
+  const ts = document.getElementById('tc-script');
+  if (data.story_script) {
+    ts.innerHTML = renderScript(data.story_script);
+  } else {
+    ts.innerHTML = '<div class="empty"><div class="icon">📝</div><div class="msg">尚未生成剧情脚本</div></div>';
+  }
+
+  // Edit plan
+  const tep = document.getElementById('tc-edit-plan');
+  if (data.edit_plan) {
+    tep.innerHTML = renderEditPlan(data.edit_plan);
+  } else {
+    tep.innerHTML = '<div class="empty"><div class="icon">📋</div><div class="msg">尚未生成剪辑计划</div></div>';
+  }
+
+  // Output
+  const to = document.getElementById('tc-output');
+  if (data.outputs && Object.keys(data.outputs).length > 0) {
+    let html = '';
+    for (const [name, info] of Object.entries(data.outputs)) {
+      if (name.endsWith('.mp4')) {
+        html += `<div class="output-card">
+          <video src="${API}/api/output/${data.id}/${name}" controls></video>
+          <div class="info"><strong>${name}</strong> · ${info.size_mb}MB</div>
+        </div>`;
+      } else if (name.endsWith('.srt')) {
+        html += `<div class="output-card"><div class="info"><strong>${name}</strong> · ${info.size_mb}KB</div></div>`;
+      } else if (name.endsWith('.jpg')) {
+        html += `<div class="output-card"><img src="${API}/api/output/${data.id}/${name}" style="max-width:200px;border-radius:8px"><div class="info"><strong>${name}</strong></div></div>`;
+      }
+    }
+    to.innerHTML = html || '<div class="empty"><div class="icon">🎬</div><div class="msg">暂无输出</div></div>';
+  } else {
+    to.innerHTML = '<div class="empty"><div class="icon">🎬</div><div class="msg">尚未渲染输出</div></div>';
+  }
+}
+
+function renderScript(script) {
+  // Store script globally for save
+  window._currentScript = JSON.parse(JSON.stringify(script));
+
+  let html = `<div class="script-card">
+    <div class="edit-row" style="margin-bottom:8px">
+      <input class="edit-field" id="script-title" value="${esc(script.title || '')}" placeholder="视频标题" style="font-size:20px;font-weight:700;color:var(--accent)">
+    </div>
+    <div class="edit-row" style="margin-bottom:12px">
+      <input class="edit-field" id="script-subtitle" value="${esc(script.subtitle || '')}" placeholder="副标题">
+    </div>
+    <div class="edit-row" style="margin-bottom:12px">
+      <textarea class="edit-field" id="script-storyline" rows="2" placeholder="故事线">${esc(script.storyline || '')}</textarea>
+    </div>
+    <div style="display:flex;gap:16px;margin-bottom:16px;font-size:13px;color:var(--text2);flex-wrap:wrap">
+      <span>🎬 <input class="edit-field sm" id="script-tone" value="${esc(script.tone || '')}" style="width:120px" placeholder="调性"></span>
+      <span>⏱️ <input class="edit-field sm" id="script-duration" type="number" value="${script.duration_target || 66}" style="width:50px">s</span>
+      <span>🎵 <input class="edit-field sm" id="script-music" value="${esc(script.music_style || '')}" style="width:140px" placeholder="音乐风格"></span>
+      <span>🎙️ <select class="edit-field sm" id="script-voiceover" style="width:70px"><option value="true" ${script.voiceover?'selected':''}>旁白</option><option value="false" ${!script.voiceover?'selected':''}>无旁白</option></select></span>
+    </div>`;
+
+  if (script.clips && script.clips.length > 0) {
+    html += '<div class="script-clips">';
+    script.clips.forEach((c, i) => {
+      const srcUrl = `${API}/api/video/${currentProject}/${c.source || ''}`;
+      const startT = c.start ?? 0;
+      const endT = c.end ?? 0;
+      html += `<div class="script-clip" data-idx="${i}">
+        <div class="role-badge">
+          <select class="edit-field" style="background:transparent;border:none;color:var(--accent);font-size:11px;text-align:center;width:55px;padding:2px" data-field="role">
+            ${['opening','space','action_intro','action','collect','life','result','detail','ending','content','climax'].map(r => `<option value="${r}" ${c.role===r?'selected':''}>${r}</option>`).join('')}
+          </select>
+        </div>
+        <div class="clip-info">
+          <input class="edit-field" data-field="caption" value="${esc(c.caption || '')}" placeholder="字幕文字" style="font-weight:600;font-size:14px">
+          <div class="edit-row">
+            <label>📁</label><input class="edit-field" data-field="source" value="${esc(c.source || '')}" placeholder="源视频文件名" style="width:200px">
+          </div>
+          <div class="edit-row">
+            <label>⏱️</label>
+            <input class="edit-field sm" data-field="start" type="number" step="0.1" value="${startT}">
+            <span style="color:var(--text2)">→</span>
+            <input class="edit-field sm" data-field="end" type="number" step="0.1" value="${endT}">
+            <span style="color:var(--text2)">s</span>
+          </div>
+          <div class="edit-row">
+            <label>🎙️</label><input class="edit-field" data-field="voiceover_text" value="${esc(c.voiceover_text || '')}" placeholder="旁白文字" style="color:var(--accent3)">
+          </div>
+          <div class="edit-row">
+            <label>💡</label><input class="edit-field" data-field="note" value="${esc(c.note || '')}" placeholder="剪辑说明" style="color:var(--text2)">
+          </div>
+          <span class="preview-toggle" onclick="togglePreview(this, '${srcUrl}', ${startT}, ${endT})">▶ 预览此片段</span>
+          <div class="clip-preview" id="spreview-${i}"></div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // Hashtags
+  const tags = (script.hashtags || []).map(h => h.replace(/^#/, '')).join(', ');
+  html += `<div class="edit-row" style="margin-top:16px">
+    <label style="color:var(--accent)">#</label>
+    <input class="edit-field" id="script-hashtags" value="${esc(tags)}" placeholder="话题标签，逗号分隔" style="color:var(--accent)">
+  </div>`;
+
+  // Save bar
+  html += `</div>
+  <div class="save-bar">
+    <button class="btn primary" onclick="saveStoryScript()">💾 保存脚本</button>
+    <button class="btn green" onclick="saveAndRender()">💾 保存并重新渲染</button>
+    <div class="status" id="script-save-status"></div>
+  </div>`;
+
+  return html;
+}
+
+function renderEditPlan(plan) {
+  window._currentPlan = JSON.parse(JSON.stringify(plan));
+
+  let html = `<div class="script-card">
+    <div class="title">${plan.title || '剪辑计划'}</div>
+    <div class="subtitle">${plan.storyline || ''}</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:16px">
+      目标时长: ${plan.target_duration}s · 实际时长: <span id="plan-actual-dur">${plan.actual_duration?.toFixed(1)}</span>s · <span id="plan-clip-count">${plan.clips?.length || 0}</span> 个片段
+    </div>`;
+
+  if (plan.clips && plan.clips.length > 0) {
+    html += '<div class="script-clips">';
+    plan.clips.forEach((c, i) => {
+      const srcUrl = `${API}/api/video/${currentProject}/${c.source || ''}`;
+      const startT = c.start ?? 0;
+      const endT = c.end ?? 0;
+      html += `<div class="script-clip" data-idx="${i}">
+        <div class="role-badge">${c.role || `#${i+1}`}</div>
+        <div class="clip-info">
+          <input class="edit-field" data-field="caption" value="${esc(c.caption || '')}" placeholder="字幕" style="font-weight:600">
+          <div class="edit-row">
+            <label>📁</label><input class="edit-field" data-field="source" value="${esc(c.source || '')}" placeholder="源文件" style="width:200px">
+          </div>
+          <div class="edit-row">
+            <label>⏱️</label>
+            <input class="edit-field sm" data-field="start" type="number" step="0.1" value="${startT}">
+            <span style="color:var(--text2)">→</span>
+            <input class="edit-field sm" data-field="end" type="number" step="0.1" value="${endT}">
+            <span style="color:var(--text2)">s</span>
+            <span style="color:var(--text2);margin-left:8px">时间线:</span>
+            <span style="color:var(--accent2);font-family:monospace;font-size:12px">${c.timeline_start?.toFixed(1)}→${c.timeline_end?.toFixed(1)}</span>
+          </div>
+          <div class="edit-row">
+            <label>💡</label><input class="edit-field" data-field="note" value="${esc(c.note || '')}" placeholder="备注" style="color:var(--text2)">
+          </div>
+          <span class="preview-toggle" onclick="togglePreview(this, '${srcUrl}', ${startT}, ${endT})">▶ 预览此片段</span>
+          <div class="clip-preview" id="preview-${i}"></div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  html += `</div>
+  <div class="save-bar">
+    <button class="btn primary" onclick="saveEditPlan()">💾 保存计划</button>
+    <button class="btn green" onclick="savePlanAndRender()">💾 保存并重新渲染</button>
+    <div class="status" id="plan-save-status"></div>
+  </div>`;
+
+  return html;
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function togglePreview(el, srcUrl, start, end) {
+  const container = el.nextElementSibling;
+  if (container.classList.contains('show')) {
+    // 隐藏预览
+    container.classList.remove('show');
+    container.innerHTML = '';
+    el.textContent = '▶ 预览此片段';
+  } else {
+    // 显示预览
+    const dur = (end - start).toFixed(1);
+    container.innerHTML = `<video src="${srcUrl}#t=${start},${end}" controls autoplay style="max-height:400px"></video>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">${start.toFixed(1)}s → ${end.toFixed(1)}s (${dur}s)</div>`;
+    container.classList.add('show');
+    el.textContent = '✕ 关闭预览';
+    // seek到起始位置
+    const video = container.querySelector('video');
+    video.addEventListener('loadedmetadata', () => { video.currentTime = start; });
+  }
+}
+
+// ─── Collect edited script from DOM ───
+function collectScript() {
+  const script = window._currentScript || {};
+  script.title = document.getElementById('script-title')?.value || script.title;
+  script.subtitle = document.getElementById('script-subtitle')?.value || script.subtitle;
+  script.storyline = document.getElementById('script-storyline')?.value || script.storyline;
+  script.tone = document.getElementById('script-tone')?.value || script.tone;
+  script.duration_target = parseInt(document.getElementById('script-duration')?.value) || 66;
+  script.music_style = document.getElementById('script-music')?.value || script.music_style;
+  script.voiceover = document.getElementById('script-voiceover')?.value === 'true';
+  const tagsStr = document.getElementById('script-hashtags')?.value || '';
+  script.hashtags = tagsStr.split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+
+  // Collect clips
+  const clipEls = document.querySelectorAll('#tc-script .script-clip');
+  script.clips = Array.from(clipEls).map(el => {
+    const clip = {};
+    el.querySelectorAll('.edit-field').forEach(f => {
+      let val = f.value;
+      if (f.dataset.field === 'start' || f.dataset.field === 'end') val = parseFloat(val) || 0;
+      clip[f.dataset.field] = val;
+    });
+    clip.duration = (clip.end || 0) - (clip.start || 0);
+    return clip;
+  });
+  return script;
+}
+
+function collectEditPlan() {
+  const plan = window._currentPlan || {};
+  const clipEls = document.querySelectorAll('#tc-edit-plan .script-clip');
+  plan.clips = Array.from(clipEls).map(el => {
+    const clip = {};
+    el.querySelectorAll('.edit-field').forEach(f => {
+      let val = f.value;
+      if (f.dataset.field === 'start' || f.dataset.field === 'end') val = parseFloat(val) || 0;
+      clip[f.dataset.field] = val;
+    });
+    clip.duration = (clip.end || 0) - (clip.start || 0);
+    return clip;
+  });
+  return plan;
+}
+
+// ─── Save functions ───
+async function saveStoryScript() {
+  if (!currentProject) return;
+  const script = collectScript();
+  const status = document.getElementById('script-save-status');
+  status.textContent = '保存中...';
+  try {
+    const res = await fetch(`${API}/api/projects/${currentProject}/story-script`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(script)
+    });
+    const data = await res.json();
+    if (data.error) { status.textContent = '❌ ' + data.error; return; }
+    status.textContent = `✅ 已保存，剪辑计划已同步 (${data.plan_clips} 片段, ${data.plan_duration?.toFixed(1)}s)`;
+    showToast('✅ 脚本已保存，剪辑计划已同步');
+    window._currentScript = script;
+    // 直接用返回的 plan 刷新剪辑计划 tab
+    if (data.plan) {
+      document.getElementById('tc-edit-plan').innerHTML = renderEditPlan(data.plan);
+    }
+  } catch(e) { status.textContent = '❌ ' + e.message; }
+}
+
+async function saveAndRender() {
+  await saveStoryScript();
+  await runStage('render');
+}
+
+async function saveEditPlan() {
+  if (!currentProject) return;
+  const plan = collectEditPlan();
+  const status = document.getElementById('plan-save-status');
+  status.textContent = '保存中...';
+  try {
+    const res = await fetch(`${API}/api/projects/${currentProject}/edit-plan`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(plan)
+    });
+    const data = await res.json();
+    if (data.error) { status.textContent = '❌ ' + data.error; return; }
+    status.textContent = `✅ 已保存 (${data.clips} 片段, ${data.duration?.toFixed(1)}s)`;
+    showToast('✅ 剪辑计划已保存');
+    window._currentPlan = plan;
+    // Update timeline display
+    document.getElementById('plan-actual-dur').textContent = data.duration?.toFixed(1);
+    document.getElementById('plan-clip-count').textContent = data.clips;
+  } catch(e) { status.textContent = '❌ ' + e.message; }
+}
+
+async function savePlanAndRender() {
+  await saveEditPlan();
+  await runStage('render');
+}
+
+function showToast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+async function reloadEditPlan() {
+  if (!currentProject) return;
+  try {
+    const res = await fetch(`${API}/api/projects/${currentProject}`);
+    const data = await res.json();
+    if (data.edit_plan) {
+      document.getElementById('tc-edit-plan').innerHTML = renderEditPlan(data.edit_plan);
+    }
+    // 也刷新输出 tab
+    if (data.outputs) {
+      const to = document.getElementById('tc-output');
+      let html = '';
+      for (const [name, info] of Object.entries(data.outputs)) {
+        if (name.endsWith('.mp4')) {
+          html += `<div class="output-card"><video src="${API}/api/output/${currentProject}/${name}" controls></video><div class="info"><strong>${name}</strong> · ${info.size_mb}MB</div></div>`;
+        } else if (name.endsWith('.jpg')) {
+          html += `<div class="output-card"><img src="${API}/api/output/${currentProject}/${name}" style="max-width:200px;border-radius:8px"><div class="info"><strong>${name}</strong></div></div>`;
+        }
+      }
+      if (html) to.innerHTML = html;
+    }
+  } catch(e) { console.error('reloadEditPlan error:', e); }
+}
+
+// ─── Run stages ───
+async function runStage(stage) {
+  if (!currentProject) return;
+  const theme = document.getElementById('themeInput').value || '日常生活记录';
+  const btn = event.target;
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span>' + origText;
+
+  showProgress();
+  connectSSE();
+
+  try {
+    const duration = parseInt(document.getElementById('durationInput')?.value) || 60;
+    const body = stage === 'visual-analysis' || stage === 'story-script' || stage === 'edit-plan'
+      ? JSON.stringify({ theme, duration }) : '{}';
+    const res = await fetch(`${API}/api/projects/${currentProject}/${stage}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('错误: ' + data.error);
+    }
+    // Reload project data
+    await openProject(currentProject);
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+    hideProgress();
+  }
+}
+
+async function runFullPipeline() {
+  if (!currentProject) return;
+  const theme = document.getElementById('themeInput').value || '日常生活记录';
+  const duration = parseInt(document.getElementById('durationInput').value) || 60;
+  const btn = document.getElementById('btnFullPipeline');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 全流程运行中...';
+
+  showProgress();
+  connectSSE();
+
+  try {
+    await fetch(`${API}/api/projects/${currentProject}/full-pipeline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme, duration }),
+    });
+
+    // Poll for completion
+    const checkDone = setInterval(async () => {
+      const res = await fetch(`${API}/api/projects/${currentProject}/progress`);
+      const data = await res.json();
+      updateProgressUI(data);
+      if (data.percent >= 100 || data.stage === 'error') {
+        clearInterval(checkDone);
+        await openProject(currentProject);
+        btn.disabled = false;
+        btn.innerHTML = '🚀 一键全流程';
+        hideProgress();
+      }
+    }, 1000);
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = '🚀 一键全流程';
+    hideProgress();
+  }
+}
+
+// ─── Progress ───
+function showProgress() {
+  document.getElementById('progressBar').style.display = 'block';
+  document.getElementById('progressText').style.display = 'block';
+}
+function hideProgress() {
+  setTimeout(() => {
+    document.getElementById('progressBar').style.display = 'none';
+    document.getElementById('progressText').style.display = 'none';
+  }, 2000);
+}
+function updateProgressUI(data) {
+  const pct = Math.max(0, Math.min(100, data.percent || 0));
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressText').textContent = `[${data.stage}] ${data.message} (${pct}%)`;
+}
+function connectSSE() {
+  if (progressSSE) progressSSE.close();
+  progressSSE = new EventSource(`${API}/api/projects/${currentProject}/progress/stream`);
+  progressSSE.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      updateProgressUI(data);
+    } catch {}
+  };
+  progressSSE.onerror = () => { progressSSE.close(); };
+}
+
+// ─── Utilities ───
+function fmtTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(1);
+  return `${m}:${sec.padStart(4, '0')}`;
+}
+
+function syntaxHighlight(json) {
+  return json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"([^"]+)"(?=\s*:)/g, '<span class="json-key">"$1"</span>')
+    .replace(/:\s*"([^"]*)"/g, ': <span class="json-string">"$1"</span>')
+    .replace(/:\s*(\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
+    .replace(/:\s*(true|false|null)/g, ': <span class="json-bool">$1</span>');
+}
+
+function showLightbox(src) {
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightbox').classList.add('show');
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('show');
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLightbox();
+});
+
+// Init
+loadProjects();
+</script>
+</body>
+</html>
