@@ -192,27 +192,70 @@ def seconds_to_srt(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
+def slugify(text: str) -> str:
+    """将中文/英文文本转为 URL-safe slug"""
+    try:
+        from pypinyin import pinyin, Style
+        # 中文转拼音
+        py = pinyin(text, style=Style.NORMAL)
+        text = "-".join([p[0] for p in py if p[0]])
+    except ImportError:
+        # pypinyin 不可用时，保留原样
+        pass
+
+    # 转小写，替换非字母数字为连字符
+    slug = re.sub(r'[^a-z0-9]+', '-', text.lower().strip())
+    slug = slug.strip('-')
+    return slug or "untitled"
+
+
+def _build_project_info(project_id: str, project_dir: str) -> dict:
+    """构建项目信息字典"""
+    raw_dir = os.path.join(project_dir, "raw")
+    videos = [f for f in os.listdir(raw_dir) if os.path.splitext(f)[1].lower() in VIDEO_EXTS] if os.path.isdir(raw_dir) else []
+    outputs_dir = os.path.join(project_dir, "outputs")
+    has_output = os.path.exists(os.path.join(outputs_dir, "rough_cut.mp4")) if os.path.isdir(outputs_dir) else False
+
+    # 解析日期和主题
+    parts = project_id.split("/", 1)
+    date_str = parts[0]
+    topic = parts[1] if len(parts) > 1 else ""
+
+    return {
+        "id": project_id,
+        "date": date_str,
+        "topic": topic,
+        "video_count": len(videos),
+        "has_output": has_output,
+        "has_analysis": os.path.exists(os.path.join(project_dir, "analysis.json")),
+        "has_edit_plan": os.path.exists(os.path.join(project_dir, "edit_plan.json")),
+        "has_story_script": os.path.exists(os.path.join(project_dir, "story_script.json")),
+    }
+
+
 def list_projects() -> list[dict]:
-    """列出所有项目（日期目录）"""
+    """列出所有项目（支持日期目录 + 主题子目录两层结构）"""
     projects = []
     if not os.path.isdir(ROOT_DIR):
         return projects
+
     for name in sorted(os.listdir(ROOT_DIR), reverse=True):
         date_dir = os.path.join(ROOT_DIR, name)
-        raw_dir = os.path.join(date_dir, "raw")
-        if os.path.isdir(date_dir) and os.path.isdir(raw_dir):
-            videos = [f for f in os.listdir(raw_dir) if os.path.splitext(f)[1].lower() in VIDEO_EXTS]
-            outputs_dir = os.path.join(date_dir, "outputs")
-            has_output = os.path.exists(os.path.join(outputs_dir, "rough_cut.mp4")) if os.path.isdir(outputs_dir) else False
-            projects.append({
-                "id": name,
-                "date": name,
-                "video_count": len(videos),
-                "has_output": has_output,
-                "has_analysis": os.path.exists(os.path.join(date_dir, "analysis.json")),
-                "has_edit_plan": os.path.exists(os.path.join(date_dir, "edit_plan.json")),
-                "has_story_script": os.path.exists(os.path.join(date_dir, "story_script.json")),
-            })
+        if not os.path.isdir(date_dir) or name == "Inbox":
+            continue
+
+        # 旧格式兼容：直接 date/raw/
+        if os.path.isdir(os.path.join(date_dir, "raw")):
+            projects.append(_build_project_info(name, date_dir))
+            continue
+
+        # 新格式：遍历日期下的主题目录
+        for topic_name in sorted(os.listdir(date_dir)):
+            topic_dir = os.path.join(date_dir, topic_name)
+            if os.path.isdir(topic_dir) and os.path.isdir(os.path.join(topic_dir, "raw")):
+                project_id = f"{name}/{topic_name}"
+                projects.append(_build_project_info(project_id, topic_dir))
+
     return projects
 
 
@@ -267,9 +310,15 @@ def get_project_data(project_id: str) -> dict:
                     "path": fpath,
                 }
 
+    # 解析日期和主题
+    parts = project_id.split("/", 1)
+    date_str = parts[0]
+    topic = parts[1] if len(parts) > 1 else ""
+
     return {
         "id": project_id,
-        "date": project_id,
+        "date": date_str,
+        "topic": topic,
         "dir": date_dir,
         "videos": videos,
         "keyframes": keyframes,
@@ -285,8 +334,8 @@ def get_project_data(project_id: str) -> dict:
 # Stage 1: 视频导入
 # ═══════════════════════════════════════════════════════════
 
-def stage_import(project_id: str = None) -> dict:
-    """扫描 Inbox，按日期归档"""
+def stage_import(project_id: str = None, topic: str = "default") -> dict:
+    """扫描 Inbox，按日期归档到主题目录"""
     update_progress(project_id or "import", "import", 0, "扫描 Inbox...")
 
     imported = []
@@ -305,19 +354,19 @@ def stage_import(project_id: str = None) -> dict:
 
         ct = get_creation_time(src)
         date_str = ct.strftime("%Y-%m-%d")
-        raw_dir = ensure_dir(ROOT_DIR, date_str, "raw")
+        raw_dir = ensure_dir(ROOT_DIR, date_str, topic, "raw")
         dst = os.path.join(raw_dir, fname)
 
         if os.path.abspath(src) != os.path.abspath(dst):
             shutil.move(src, dst)
-            imported.append({"file": fname, "date": date_str})
-            print(f"  归档: {fname} → {date_str}/raw/")
+            imported.append({"file": fname, "date": date_str, "topic": topic})
+            print(f"  归档: {fname} → {date_str}/{topic}/raw/")
 
     update_progress(project_id or "import", "import", 100, f"导入完成: {len(imported)} 个视频")
     return {"imported": imported}
 
 
-def stage_import_direct(files: list[str], project_id: str = None) -> dict:
+def stage_import_direct(files: list[str], project_id: str = None, topic: str = "default") -> dict:
     """直接导入指定文件到项目"""
     imported = []
     for fpath in files:
@@ -329,13 +378,19 @@ def stage_import_direct(files: list[str], project_id: str = None) -> dict:
             continue
 
         ct = get_creation_time(fpath)
-        date_str = project_id or ct.strftime("%Y-%m-%d")
-        raw_dir = ensure_dir(ROOT_DIR, date_str, "raw")
+        date_str = ct.strftime("%Y-%m-%d")
+        # 如果 project_id 包含日期信息，使用它
+        if project_id:
+            parts = project_id.split("/", 1)
+            date_str = parts[0]
+            if len(parts) > 1:
+                topic = parts[1]
+        raw_dir = ensure_dir(ROOT_DIR, date_str, topic, "raw")
         dst = os.path.join(raw_dir, fname)
 
         if os.path.abspath(fpath) != os.path.abspath(dst):
             shutil.copy2(fpath, dst)
-        imported.append({"file": fname, "date": date_str})
+        imported.append({"file": fname, "date": date_str, "topic": topic})
 
     return {"imported": imported}
 
@@ -1415,19 +1470,56 @@ def api_projects():
     return jsonify(list_projects())
 
 
-@app.route("/api/projects/<project_id>", methods=["GET"])
+@app.route("/api/projects", methods=["POST"])
+def api_create_project():
+    """创建新项目"""
+    data = request.json or {}
+    date_str = data.get("date", datetime.datetime.now().strftime("%Y-%m-%d"))
+    topic_input = data.get("topic", "")
+    topic_slug = data.get("topic_slug", "")
+
+    if not topic_input and not topic_slug:
+        return jsonify({"error": "请提供主题名 (topic) 或主题 slug (topic_slug)"}), 400
+
+    # 如果提供了中文主题名，自动生成 slug
+    if topic_input and not topic_slug:
+        topic_slug = slugify(topic_input)
+
+    project_id = f"{date_str}/{topic_slug}"
+    project_dir = ensure_dir(ROOT_DIR, date_str, topic_slug, "raw")
+
+    # 创建主题元数据文件
+    meta_path = os.path.join(ROOT_DIR, date_str, topic_slug, "meta.json")
+    if not os.path.exists(meta_path):
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "topic": topic_input or topic_slug,
+                "slug": topic_slug,
+                "created_at": datetime.datetime.now().isoformat(),
+            }, f, ensure_ascii=False, indent=2)
+
+    return jsonify({
+        "id": project_id,
+        "date": date_str,
+        "topic": topic_input or topic_slug,
+        "topic_slug": topic_slug,
+        "dir": project_dir,
+    })
+
+
+@app.route("/api/projects/<path:project_id>", methods=["GET"])
 def api_project_detail(project_id):
     return jsonify(get_project_data(project_id))
 
 
-@app.route("/api/projects/<project_id>/progress", methods=["GET"])
+@app.route("/api/projects/<path:project_id>/progress", methods=["GET"])
 def api_progress(project_id):
     with progress_lock:
         data = progress_store.get(project_id, {"stage": "idle", "percent": 0, "message": ""})
     return jsonify(data)
 
 
-@app.route("/api/projects/<project_id>/progress/stream")
+@app.route("/api/projects/<path:project_id>/progress/stream")
 def api_progress_stream(project_id):
     """SSE endpoint for real-time progress"""
     def generate():
@@ -1446,18 +1538,19 @@ def api_progress_stream(project_id):
 
 # --- Pipeline stage endpoints ---
 
-@app.route("/api/projects/<project_id>/import", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/import", methods=["POST"])
 def api_import(project_id):
+    topic = request.json.get("topic", "default") if request.json else "default"
     def run():
         try:
-            result = stage_import(project_id)
+            result = stage_import(project_id, topic)
             return result
         except Exception as e:
             return {"error": str(e)}
     return jsonify(run())
 
 
-@app.route("/api/projects/<project_id>/keyframes", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/keyframes", methods=["POST"])
 def api_keyframes(project_id):
     fps = float(request.json.get("fps_interval", 2.0)) if request.json else 2.0
     scene = float(request.json.get("scene_threshold", 0.35)) if request.json else 0.35
@@ -1469,7 +1562,7 @@ def api_keyframes(project_id):
     return jsonify(run())
 
 
-@app.route("/api/projects/<project_id>/contact-sheets", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/contact-sheets", methods=["POST"])
 def api_contact_sheets(project_id):
     def run():
         try:
@@ -1479,7 +1572,7 @@ def api_contact_sheets(project_id):
     return jsonify(run())
 
 
-@app.route("/api/projects/<project_id>/visual-analysis", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/visual-analysis", methods=["POST"])
 def api_visual_analysis(project_id):
     theme = request.json.get("theme", "日常生活记录") if request.json else "日常生活记录"
     def run():
@@ -1490,7 +1583,7 @@ def api_visual_analysis(project_id):
     return jsonify(run())
 
 
-@app.route("/api/projects/<project_id>/transcription", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/transcription", methods=["POST"])
 def api_transcription(project_id):
     def run():
         try:
@@ -1500,7 +1593,7 @@ def api_transcription(project_id):
     return jsonify(run())
 
 
-@app.route("/api/projects/<project_id>/story-script", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/story-script", methods=["POST"])
 def api_story_script(project_id):
     theme = request.json.get("theme", "日常生活记录") if request.json else "日常生活记录"
     duration = request.json.get("duration", 60) if request.json else 60
@@ -1512,7 +1605,7 @@ def api_story_script(project_id):
     return jsonify(run())
 
 
-@app.route("/api/projects/<project_id>/edit-plan", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/edit-plan", methods=["POST"])
 def api_edit_plan(project_id):
     theme = request.json.get("theme", "日常生活记录") if request.json else "日常生活记录"
     def run():
@@ -1523,7 +1616,7 @@ def api_edit_plan(project_id):
     return jsonify(run())
 
 
-@app.route("/api/projects/<project_id>/render", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/render", methods=["POST"])
 def api_render(project_id):
     burn = request.json.get("burn_subtitles", True) if request.json else True
     audio_mode = request.json.get("audio_mode", "source") if request.json else "source"
@@ -1629,7 +1722,7 @@ def _sync_script_to_plan(project_id: str, script: dict) -> dict:
     return plan
 
 
-@app.route("/api/projects/<project_id>/story-script", methods=["PUT"])
+@app.route("/api/projects/<path:project_id>/story-script", methods=["PUT"])
 def api_save_story_script(project_id):
     """保存编辑后的故事脚本，自动同步到剪辑计划"""
     date_dir = os.path.join(ROOT_DIR, project_id)
@@ -1657,7 +1750,7 @@ def api_save_story_script(project_id):
     })
 
 
-@app.route("/api/projects/<project_id>/edit-plan", methods=["PUT"])
+@app.route("/api/projects/<path:project_id>/edit-plan", methods=["PUT"])
 def api_save_edit_plan(project_id):
     """保存编辑后的剪辑计划"""
     date_dir = os.path.join(ROOT_DIR, project_id)
@@ -1699,7 +1792,7 @@ def api_save_edit_plan(project_id):
     })
 
 
-@app.route("/api/projects/<project_id>/full-pipeline", methods=["POST"])
+@app.route("/api/projects/<path:project_id>/full-pipeline", methods=["POST"])
 def api_full_pipeline(project_id):
     theme = request.json.get("theme", "日常生活记录") if request.json else "日常生活记录"
     duration = request.json.get("duration", 60) if request.json else 60
@@ -1728,28 +1821,28 @@ def api_serve_file(filepath):
     return send_from_directory(directory, filename)
 
 
-@app.route("/api/video/<project_id>/<filename>")
+@app.route("/api/video/<path:project_id>/<filename>")
 def api_video(project_id, filename):
     """提供视频文件"""
     raw_dir = os.path.join(ROOT_DIR, project_id, "raw")
     return send_from_directory(raw_dir, filename)
 
 
-@app.route("/api/keyframe/<project_id>/<sub>/<filename>")
+@app.route("/api/keyframe/<path:project_id>/<sub>/<filename>")
 def api_keyframe(project_id, sub, filename):
     """提供关键帧图片"""
     kf_dir = os.path.join(ROOT_DIR, project_id, "keyframes", sub)
     return send_from_directory(kf_dir, filename)
 
 
-@app.route("/api/contact-sheet/<project_id>/<filename>")
+@app.route("/api/contact-sheet/<path:project_id>/<filename>")
 def api_contact_sheet(project_id, filename):
     """提供 contact sheet"""
     cs_dir = os.path.join(ROOT_DIR, project_id, "contact_sheets")
     return send_from_directory(cs_dir, filename)
 
 
-@app.route("/api/output/<project_id>/<filename>")
+@app.route("/api/output/<path:project_id>/<filename>")
 def api_output(project_id, filename):
     """提供输出文件"""
     out_dir = os.path.join(ROOT_DIR, project_id, "outputs")

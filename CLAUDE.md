@@ -20,16 +20,21 @@
 ## 数据目录结构
 ```
 ~/Movies/GardenAutoCut/
-├── Inbox/          # 放入待处理视频
-└── YYYY-MM-DD/     # 按日期归档
-    ├── raw/        # 原始视频
-    ├── keyframes/  # 抽取的关键帧
-    ├── audio/      # 提取的音频
-    ├── outputs/    # 输出文件 (rough_cut.mp4, cover.jpg, captions.srt)
-    ├── analysis.json
-    ├── story_script.json
-    └── edit_plan.json
+├── Inbox/                    # 放入待处理视频
+└── YYYY-MM-DD/               # 按日期归档
+    └── <topic-slug>/         # 主题项目 (如 garden-trimming, pet-daily)
+        ├── raw/              # 原始视频
+        ├── keyframes/        # 抽取的关键帧
+        ├── audio/            # 提取的音频
+        ├── outputs/          # 输出文件 (rough_cut.mp4, cover.jpg, captions.srt)
+        ├── meta.json         # 主题元数据 (主题名、slug、创建时间)
+        ├── analysis.json
+        ├── story_script.json
+        └── edit_plan.json
 ```
+
+**project_id 格式**: `YYYY-MM-DD/<topic-slug>` (如 `2026-06-05/garden-trimming`)
+**旧格式兼容**: 也支持 `YYYY-MM-DD` 直接作为 project_id (目录下直接有 raw/)
 
 ## 8 阶段 Pipeline
 1. 视频导入 (ffprobe 按日期归档)

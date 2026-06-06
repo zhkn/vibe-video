@@ -38,7 +38,8 @@ a { color: var(--accent); text-decoration: none; }
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
 .project-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; cursor: pointer; transition: all 0.2s; }
 .project-card:hover { border-color: var(--accent); transform: translateY(-2px); }
-.project-card .date { font-size: 24px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+.project-card .date { font-size: 20px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+.project-card .topic { font-size: 14px; color: var(--accent3); margin-bottom: 8px; }
 .project-card .info { color: var(--text2); font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap; }
 .project-card .info .tag { background: var(--bg3); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
 .project-card .info .tag.done { background: rgba(63,185,80,0.15); color: var(--green); }
@@ -153,6 +154,18 @@ a { color: var(--accent); text-decoration: none; }
 .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Modal */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; display: none; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; width: 400px; max-width: 90vw; }
+.modal h3 { font-size: 18px; margin-bottom: 16px; color: var(--accent); }
+.modal .form-group { margin-bottom: 16px; }
+.modal .form-group label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 6px; }
+.modal .form-group input { width: 100%; background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 14px; }
+.modal .form-group input:focus { border-color: var(--accent); outline: none; }
+.modal .form-actions { display: flex; gap: 12px; justify-content: flex-end; }
+.modal .hint { font-size: 11px; color: var(--text2); margin-top: 4px; }
+
 /* Responsive */
 @media (max-width: 768px) {
   .container { padding: 12px; }
@@ -176,9 +189,32 @@ a { color: var(--accent); text-decoration: none; }
   <div id="projectList">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
       <h2 style="font-size:18px;color:var(--text2)">📁 项目列表</h2>
-      <button class="btn" onclick="loadProjects()">🔄 刷新</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn primary" onclick="showCreateModal()">➕ 新建项目</button>
+        <button class="btn" onclick="loadProjects()">🔄 刷新</button>
+      </div>
     </div>
     <div class="project-grid" id="projectGrid"></div>
+  </div>
+
+  <!-- Create Project Modal -->
+  <div class="modal-overlay" id="createModal">
+    <div class="modal">
+      <h3>➕ 新建项目</h3>
+      <div class="form-group">
+        <label>📅 日期</label>
+        <input type="date" id="newProjectDate" value="">
+      </div>
+      <div class="form-group">
+        <label>🏷️ 主题名称</label>
+        <input type="text" id="newProjectTopic" placeholder="例如：花园修剪、宠物日常" value="">
+        <div class="hint">中文主题名会自动生成英文 slug（如"花园修剪" → "garden-trimming"）</div>
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="closeCreateModal()">取消</button>
+        <button class="btn primary" onclick="createProject()">创建</button>
+      </div>
+    </div>
   </div>
 
   <!-- Project Detail -->
@@ -265,7 +301,8 @@ async function loadProjects() {
   }
   grid.innerHTML = projects.map(p => `
     <div class="project-card" onclick="openProject('${p.id}')">
-      <div class="date">📅 ${p.id}</div>
+      <div class="date">📅 ${p.date || p.id}</div>
+      ${p.topic ? `<div class="topic">🏷️ ${p.topic}</div>` : ''}
       <div class="info">
         <span class="tag">${p.video_count} 个视频</span>
         <span class="tag ${p.has_analysis ? 'done' : 'pending'}">${p.has_analysis ? '✓ 已分析' : '○ 未分析'}</span>
@@ -281,11 +318,17 @@ async function openProject(projectId) {
   currentProject = projectId;
   document.getElementById('projectList').style.display = 'none';
   document.getElementById('projectDetail').style.display = 'block';
-  document.getElementById('projectTitle').textContent = '📅 ' + projectId;
   document.getElementById('backBtn').style.display = 'inline-block';
 
   const res = await fetch(`${API}/api/projects/${projectId}`);
   const data = await res.json();
+
+  // 显示日期 + 主题
+  const titleParts = [];
+  if (data.date) titleParts.push('📅 ' + data.date);
+  if (data.topic) titleParts.push('🏷️ ' + data.topic);
+  document.getElementById('projectTitle').textContent = titleParts.join(' · ') || projectId;
+
   renderProject(data);
 }
 
@@ -811,6 +854,46 @@ function closeLightbox() {
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeLightbox();
+});
+
+// ─── Create project ───
+function showCreateModal() {
+  document.getElementById('newProjectDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('newProjectTopic').value = '';
+  document.getElementById('createModal').classList.add('show');
+}
+
+function closeCreateModal() {
+  document.getElementById('createModal').classList.remove('show');
+}
+
+async function createProject() {
+  const date = document.getElementById('newProjectDate').value;
+  const topic = document.getElementById('newProjectTopic').value.trim();
+
+  if (!date) { alert('请选择日期'); return; }
+  if (!topic) { alert('请输入主题名称'); return; }
+
+  try {
+    const res = await fetch(`${API}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, topic }),
+    });
+    const data = await res.json();
+    if (data.error) { alert('错误: ' + data.error); return; }
+
+    closeCreateModal();
+    showToast(`✅ 项目已创建: ${data.date}/${data.topic_slug}`);
+    await loadProjects();
+  } catch (e) {
+    alert('创建失败: ' + e.message);
+  }
+}
+
+// Close modal on overlay click
+document.getElementById('createModal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeCreateModal();
 });
 
 // Init

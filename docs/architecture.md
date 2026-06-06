@@ -370,10 +370,31 @@ ffmpeg -y -i video.mp4 -vf "select='gt(scene,0.35)'" -vsync vfr output_%04d.jpg
 
 所有数据以 JSON 文件存储在项目目录中，无数据库依赖。
 
+### 6.0 目录结构
+
+项目支持同一天多个主题项目，采用两层目录结构：
+
+```
+~/Movies/GardenAutoCut/
+├── Inbox/                    # 放入待处理视频
+└── YYYY-MM-DD/               # 按日期归档
+    └── <topic-slug>/         # 主题项目 (如 garden-trimming, pet-daily)
+        ├── raw/              # 原始视频
+        ├── keyframes/        # 抽取的关键帧
+        ├── audio/            # 提取的音频
+        ├── outputs/          # 输出文件
+        ├── meta.json         # 主题元数据
+        └── *.json            # 各阶段结果文件
+```
+
+**project_id 格式**: `YYYY-MM-DD/<topic-slug>` (如 `2026-06-05/garden-trimming`)
+**旧格式兼容**: 也支持 `YYYY-MM-DD` 直接作为 project_id
+
 ### 6.1 文件列表
 
 | 文件 | 生成阶段 | 内容 |
 |------|---------|------|
+| `meta.json` | 创建项目时 | 主题元数据 (主题名、slug、创建时间) |
 | `analysis.json` | Stage 4 | 视觉分析结果数组 |
 | `transcription.json` | Stage 5 | 每个视频的转写结果数组 |
 | `raw_captions.srt` | Stage 5 | 全部视频的合并 SRT 字幕 |
