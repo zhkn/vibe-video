@@ -907,7 +907,7 @@ function renderShots(shotsData) {
           </div>
           <div class="score-group">
             <div class="label">平台评分</div>
-            ${renderScoreBar(s.platform_scores, ['hook','beauty','action','story','retention'])}
+            ${renderScoreBar(s.platform_scores, ['hook','retention','action','beauty','clarity','contrast','story_value','cover_value'])}
           </div>
         </div>
         ${(s.garden_objects||[]).length > 0 || (s.actions||[]).length > 0 ?
