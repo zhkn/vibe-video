@@ -166,6 +166,28 @@ a { color: var(--accent); text-decoration: none; }
 .modal .form-actions { display: flex; gap: 12px; justify-content: flex-end; }
 .modal .hint { font-size: 11px; color: var(--text2); margin-top: 4px; }
 
+/* Shot cards */
+.shots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.shot-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; position: relative; }
+.shot-card.deleted { opacity: 0.5; border-color: var(--danger); }
+.shot-card .shot-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.shot-card .shot-id { font-size: 12px; font-family: monospace; color: var(--accent); }
+.shot-card .shot-time { font-size: 12px; font-family: monospace; color: var(--accent2); }
+.shot-card .shot-summary { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.shot-card .shot-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.shot-card .shot-tag { background: var(--bg3); border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px; font-size: 11px; color: var(--text2); }
+.shot-card .shot-tag.use { background: rgba(88,166,255,0.15); color: var(--accent); border-color: rgba(88,166,255,0.3); }
+.shot-card .shot-tag.delete { background: rgba(248,81,73,0.15); color: var(--danger); border-color: rgba(248,81,73,0.3); }
+.shot-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.shot-scores .score-group { font-size: 11px; }
+.shot-scores .score-group .label { color: var(--text2); margin-bottom: 2px; }
+.shot-scores .score-bar { display: flex; gap: 3px; align-items: center; }
+.shot-scores .score-pip { width: 14px; height: 6px; border-radius: 2px; background: var(--bg3); }
+.shot-scores .score-pip.filled { background: var(--accent); }
+.shot-scores .score-pip.high { background: var(--green); }
+.shot-scores .score-pip.low { background: var(--danger); }
+.shot-objects { font-size: 11px; color: var(--text2); margin-top: 6px; }
+
 /* Responsive */
 @media (max-width: 768px) {
   .container { padding: 12px; }
@@ -250,7 +272,7 @@ a { color: var(--accent); text-decoration: none; }
       <div class="tab active" data-tab="videos">📹 素材视频</div>
       <div class="tab" data-tab="keyframes">🎞️ 关键帧</div>
       <div class="tab" data-tab="contact-sheets">🖼️ Contact Sheet</div>
-      <div class="tab" data-tab="analysis">👁️ 视觉分析</div>
+      <div class="tab" data-tab="analysis">👁️ 片段分析</div>
       <div class="tab" data-tab="transcription">🎙️ 字幕转写</div>
       <div class="tab" data-tab="script">📝 剧情脚本</div>
       <div class="tab" data-tab="edit-plan">📋 剪辑计划</div>
@@ -379,9 +401,11 @@ function renderProject(data) {
   const tcs = document.getElementById('tc-contact-sheets');
   tcs.innerHTML = '<div class="empty"><div class="icon">🖼️</div><div class="msg">运行视觉分析后自动生成</div></div>';
 
-  // Analysis
+  // Analysis / Shots
   const ta = document.getElementById('tc-analysis');
-  if (data.analysis && data.analysis.length > 0) {
+  if (data.shots && data.shots.shots && data.shots.shots.length > 0) {
+    ta.innerHTML = renderShots(data.shots);
+  } else if (data.analysis && data.analysis.length > 0) {
     ta.innerHTML = '<div class="json-view">' + syntaxHighlight(JSON.stringify(data.analysis, null, 2)) + '</div>';
   } else {
     ta.innerHTML = '<div class="empty"><div class="icon">👁️</div><div class="msg">尚未进行视觉分析</div></div>';
@@ -841,6 +865,67 @@ function syntaxHighlight(json) {
     .replace(/:\s*"([^"]*)"/g, ': <span class="json-string">"$1"</span>')
     .replace(/:\s*(\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
     .replace(/:\s*(true|false|null)/g, ': <span class="json-bool">$1</span>');
+}
+
+function renderShots(shotsData) {
+  const shots = shotsData.shots || [];
+  if (shots.length === 0) return '<div class="empty"><div class="icon">👁️</div><div class="msg">未发现可用片段</div></div>';
+
+  // 按 source 分组
+  const bySource = {};
+  shots.forEach(s => {
+    const src = s.source || 'unknown';
+    if (!bySource[src]) bySource[src] = [];
+    bySource[src].push(s);
+  });
+
+  let html = `<div style="margin-bottom:16px;font-size:13px;color:var(--text2)">
+    共 ${shots.length} 个候选片段，来自 ${Object.keys(bySource).length} 个视频
+    <span style="margin-left:12px">🟢 优质  🟡 普通  🔴 较差</span>
+  </div>`;
+
+  for (const [src, srcShots] of Object.entries(bySource)) {
+    html += `<div style="margin-bottom:8px;font-size:13px;color:var(--accent3);font-weight:600">📁 ${esc(src)} (${srcShots.length} shots)</div>`;
+    html += '<div class="shots-grid">';
+    srcShots.forEach(s => {
+      const isDeleted = s.delete;
+      html += `<div class="shot-card ${isDeleted ? 'deleted' : ''}">
+        <div class="shot-header">
+          <span class="shot-id">${esc(s.shot_id || '?')}</span>
+          <span class="shot-time">${(s.start||0).toFixed(1)}s → ${(s.end||0).toFixed(1)}s (${(s.duration||0).toFixed(1)}s)</span>
+        </div>
+        <div class="shot-summary">${esc(s.visual_summary || '?')}</div>
+        <div class="shot-tags">
+          ${(s.shot_types||[]).map(t => `<span class="shot-tag">${esc(t)}</span>`).join('')}
+          ${(s.recommended_use||[]).map(u => `<span class="shot-tag use">${esc(u)}</span>`).join('')}
+          ${isDeleted ? `<span class="shot-tag delete">🗑️ ${esc(s.delete_reason||'不建议使用')}</span>` : ''}
+        </div>
+        <div class="shot-scores">
+          <div class="score-group">
+            <div class="label">画面质量</div>
+            ${renderScoreBar(s.quality, ['clarity','stability','exposure','composition'])}
+          </div>
+          <div class="score-group">
+            <div class="label">平台评分</div>
+            ${renderScoreBar(s.platform_scores, ['hook','beauty','action','story','retention'])}
+          </div>
+        </div>
+        ${(s.garden_objects||[]).length > 0 || (s.actions||[]).length > 0 ?
+          `<div class="shot-objects">🏷️ ${[...(s.garden_objects||[]), ...(s.actions||[])].join(' · ')}</div>` : ''}
+      </div>`;
+    });
+    html += '</div>';
+  }
+  return html;
+}
+
+function renderScoreBar(scores, keys) {
+  if (!scores) return '';
+  return '<div class="score-bar">' + keys.map(k => {
+    const v = scores[k] || 0;
+    const cls = v >= 8 ? 'high' : v <= 4 ? 'low' : 'filled';
+    return `<div class="score-pip ${v > 0 ? cls : ''}" title="${k}: ${v}/10"></div>`;
+  }).join('') + `<span style="font-size:10px;color:var(--text2);margin-left:4px">${Object.values(scores||{}).reduce((a,b)=>a+b,0) / Math.max(Object.keys(scores||{}).length,1)}/10</span></div>`;
 }
 
 function showLightbox(src) {

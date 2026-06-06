@@ -227,7 +227,7 @@ def _build_project_info(project_id: str, project_dir: str) -> dict:
         "topic": topic,
         "video_count": len(videos),
         "has_output": has_output,
-        "has_analysis": os.path.exists(os.path.join(project_dir, "analysis.json")),
+        "has_analysis": os.path.exists(os.path.join(project_dir, "shots.json")) or os.path.exists(os.path.join(project_dir, "analysis.json")),
         "has_edit_plan": os.path.exists(os.path.join(project_dir, "edit_plan.json")),
         "has_story_script": os.path.exists(os.path.join(project_dir, "story_script.json")),
     }
@@ -315,6 +315,10 @@ def get_project_data(project_id: str) -> dict:
     date_str = parts[0]
     topic = parts[1] if len(parts) > 1 else ""
 
+    # Shots (优先) 或 Analysis (兼容)
+    shots_data = load_json("shots.json")
+    analysis_data = load_json("analysis.json")
+
     return {
         "id": project_id,
         "date": date_str,
@@ -322,7 +326,8 @@ def get_project_data(project_id: str) -> dict:
         "dir": date_dir,
         "videos": videos,
         "keyframes": keyframes,
-        "analysis": load_json("analysis.json"),
+        "shots": shots_data,
+        "analysis": analysis_data,
         "transcription": load_json("transcription.json"),
         "story_script": load_json("story_script.json"),
         "edit_plan": load_json("edit_plan.json"),
@@ -509,32 +514,57 @@ def stage_contact_sheets(project_id: str, max_frames: int = 30) -> dict:
 # Stage 4: 视觉分析
 # ═══════════════════════════════════════════════════════════
 
-VISION_PROMPT_TEMPLATE = """你是专业的视频内容分析师。请分析这些关键帧截图，为视频片段输出结构化 JSON。
+VISION_PROMPT_TEMPLATE = """你是专业的视频内容分析师和剪辑师。请分析这些关键帧截图，为每个视频片段切出多个候选 shots。
 
 用户主题偏好：{theme}
 
 这些截图来自以下视频文件：
 {video_list}
 
-每张截图的编号对应关系：编号 1-N 的帧来自第一个视频，以此类推。请根据帧内容推断每段视频的最佳使用方式。
+每张截图的编号对应关系：编号 1-N 的帧来自第一个视频，以此类推。请根据帧内容推断每段视频中有哪些可用的片段(shots)。
 
-对每个视频文件，输出一个 JSON 对象，包含：
-- file: **必须使用上面列出的实际视频文件名**（如 5894_raw.MP4），不要用 frame_set 或其他名称
-- start: 建议片段起始秒数（基于视频总时长和画面内容）
-- end: 建议片段结束秒数
-- duration: 建议片段时长(秒)
-- action: 画面中正在发生的动作（中文，15字以内）
-- subjects: 画面中的主要元素列表
-- story_role: 故事角色，从以下选一个：
-  "opening"(空镜开场), "space"(交代环境), "action_intro"(动作引入),
-  "action"(核心动作), "collect"(收集整理), "life"(生活气息),
-  "result"(成果展示), "detail"(细节特写), "ending"(空镜收尾)
-- quality_score: 画面质量 1-10
-- stability: 画面稳定度 1-10
-- privacy_risk: 隐私风险 1-10（1=无风险）
-- caption: 一句适合做字幕的中文描述（15字以内，有文采但不做作）
+对每个视频文件，找出其中所有有价值的片段，输出一个 JSON 对象，格式如下：
 
-请直接输出 JSON 数组，不要其他文字。"""
+{{
+  "shots": [
+    {{
+      "shot_id": "视频名_s001（如 5894_s001）",
+      "source": "**必须使用实际视频文件名**（如 5894_raw.MP4）",
+      "start": 起始秒数,
+      "end": 结束秒数,
+      "duration": 时长秒数,
+      "visual_summary": "画面内容描述（20字以内）",
+      "shot_types": ["标签1", "标签2"],
+      "garden_objects": ["画面中的物体"],
+      "actions": ["画面中的动作"],
+      "quality": {{
+        "clarity": 1-10,
+        "stability": 1-10,
+        "exposure": 1-10,
+        "composition": 1-10
+      }},
+      "platform_scores": {{
+        "hook": 1-10,
+        "beauty": 1-10,
+        "action": 1-10,
+        "story": 1-10,
+        "retention": 1-10
+      }},
+      "recommended_use": ["用途1", "用途2"],
+      "delete": false,
+      "delete_reason": ""
+    }}
+  ]
+}}
+
+说明：
+- shot_types 可选值：全景、中景、特写、跟拍、固定、延时、整理前、整理中、整理后、成果展示、生活气息、动作过程
+- recommended_use 可选值：开头、结尾、封面、中段快切、情感高潮、环境交代、细节展示、过渡
+- platform_scores: hook=开头吸引力, beauty=画面美感, action=动作丰富度, story=叙事价值, retention=留住观众能力
+- delete=true 表示这段素材质量太差不建议使用，需写 delete_reason
+- 每个视频至少找出 1-3 个有价值的 shots，宁多勿少
+
+请直接输出 JSON，不要其他文字。"""
 
 
 def stage_visual_analysis(project_id: str, theme: str = "日常生活记录") -> dict:
@@ -610,38 +640,140 @@ def stage_visual_analysis(project_id: str, theme: str = "日常生活记录") ->
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": content}],
-            max_tokens=4096,
+            max_tokens=8192,
             temperature=0.2,
         )
         text = response.choices[0].message.content.strip()
 
-        # 提取 JSON
-        json_match = re.search(r'\[.*\]', text, re.DOTALL)
-        if json_match:
-            analysis = json.loads(json_match.group())
+        # 提取 JSON — 优先匹配 shots 格式
+        # 尝试提取最外层 JSON 对象
+        depth = 0
+        start = -1
+        for ci, ch in enumerate(text):
+            if ch == '{':
+                if depth == 0:
+                    start = ci
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    try:
+                        parsed = json.loads(text[start:ci+1])
+                        if isinstance(parsed, dict) and "shots" in parsed:
+                            shots = parsed["shots"]
+                        elif isinstance(parsed, list):
+                            shots = parsed
+                        else:
+                            shots = [parsed]
+                        break
+                    except json.JSONDecodeError:
+                        start = -1
         else:
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            # fallback: 正则匹配数组
+            json_match = re.search(r'\[.*\]', text, re.DOTALL)
             if json_match:
-                analysis = [json.loads(json_match.group())]
+                shots = json.loads(json_match.group())
             else:
-                analysis = []
+                shots = []
     except Exception as e:
         print(f"  Vision API 错误: {e}")
         update_progress(project_id, "visual_analysis", 80, f"API 调用失败: {e}")
         # Fallback: 生成基础分析
-        analysis = _fallback_visual_analysis(project_id)
+        shots = _fallback_visual_analysis(project_id)
 
-    # 保存结果
+    # 确保每个 shot 有 shot_id
+    for i, shot in enumerate(shots):
+        if not shot.get("shot_id"):
+            src = os.path.splitext(shot.get("source", f"unknown"))[0]
+            shot["shot_id"] = f"{src}_s{i+1:03d}"
+
+    # 保存 shots.json
+    shots_data = {
+        "project_id": project_id,
+        "shots": shots,
+    }
+    shots_path = os.path.join(date_dir, "shots.json")
+    with open(shots_path, "w", encoding="utf-8") as f:
+        json.dump(shots_data, f, ensure_ascii=False, indent=2)
+
+    # 向后兼容：同时生成 analysis.json（扁平化，每个 source 取最佳 shot）
+    analysis = _shots_to_analysis(shots)
     analysis_path = os.path.join(date_dir, "analysis.json")
     with open(analysis_path, "w", encoding="utf-8") as f:
         json.dump(analysis, f, ensure_ascii=False, indent=2)
 
-    update_progress(project_id, "visual_analysis", 100, f"视觉分析完成: {len(analysis)} 个片段")
-    return {"analysis": analysis, "count": len(analysis)}
+    update_progress(project_id, "visual_analysis", 100, f"视觉分析完成: {len(shots)} 个 shots")
+    return {"shots": shots, "count": len(shots)}
+
+
+def _shots_to_analysis(shots: list[dict]) -> list[dict]:
+    """将 shots 数据转换为旧版 analysis 格式（每个 source 取最佳 shot）"""
+    by_source = {}
+    for shot in shots:
+        src = shot.get("source", "")
+        if not src:
+            continue
+        # 用 platform_scores 的平均值作为评分
+        ps = shot.get("platform_scores", {})
+        score = sum(ps.values()) / max(len(ps), 1) if ps else 5
+        if src not in by_source or score > by_source[src]["_score"]:
+            q = shot.get("quality", {})
+            by_source[src] = {
+                "file": src,
+                "start": shot.get("start", 0),
+                "end": shot.get("end", 0),
+                "duration": shot.get("duration", 0),
+                "action": shot.get("visual_summary", ""),
+                "subjects": shot.get("garden_objects", []),
+                "story_role": _use_to_role(shot.get("recommended_use", [])),
+                "quality_score": round(sum(q.values()) / max(len(q), 1)) if q else 6,
+                "stability": q.get("stability", 7),
+                "privacy_risk": 1,
+                "caption": shot.get("visual_summary", ""),
+                "_score": score,
+            }
+    # 清理临时评分字段
+    for seg in by_source.values():
+        seg.pop("_score", None)
+    return list(by_source.values())
+
+
+def _use_to_role(uses: list[str]) -> str:
+    """将 recommended_use 映射到 story_role"""
+    mapping = {
+        "开头": "opening",
+        "结尾": "ending",
+        "封面": "result",
+        "环境交代": "space",
+        "中段快切": "action",
+        "情感高潮": "result",
+        "细节展示": "detail",
+        "过渡": "space",
+    }
+    for use in uses:
+        if use in mapping:
+            return mapping[use]
+    return "action"
+
+
+def _role_to_use(role: str) -> str:
+    """将 story_role 映射到 recommended_use"""
+    mapping = {
+        "opening": "开头",
+        "ending": "结尾",
+        "result": "封面",
+        "space": "环境交代",
+        "action": "中段快切",
+        "action_intro": "中段快切",
+        "collect": "中段快切",
+        "life": "情感高潮",
+        "detail": "细节展示",
+    }
+    return mapping.get(role, "中段快切")
 
 
 def _fallback_visual_analysis(project_id: str) -> list[dict]:
-    """无 API 时的 fallback 分析"""
+    """无 API 时的 fallback 分析 — 返回 shots 格式"""
     raw_dir = os.path.join(ROOT_DIR, project_id, "raw")
     results = []
     if not os.path.isdir(raw_dir):
@@ -653,18 +785,22 @@ def _fallback_visual_analysis(project_id: str) -> list[dict]:
         fpath = os.path.join(raw_dir, fname)
         info = get_video_info(fpath)
         dur = info.get("duration", 0)
+        base = os.path.splitext(fname)[0]
         results.append({
-            "file": fname,
+            "shot_id": f"{base}_s001",
+            "source": fname,
             "start": 0.0,
             "end": min(dur, 15.0),
             "duration": min(dur, 15.0),
-            "action": "待分析",
-            "subjects": [],
-            "story_role": "action",
-            "quality_score": 6,
-            "stability": 7,
-            "privacy_risk": 1,
-            "caption": fname.split("_")[0],
+            "visual_summary": "待分析",
+            "shot_types": [],
+            "garden_objects": [],
+            "actions": [],
+            "quality": {"clarity": 6, "stability": 7, "exposure": 6, "composition": 6},
+            "platform_scores": {"hook": 5, "beauty": 5, "action": 3, "story": 5, "retention": 5},
+            "recommended_use": ["中段快切"],
+            "delete": False,
+            "delete_reason": "",
         })
     return results
 
@@ -870,12 +1006,36 @@ def stage_story_script(project_id: str, theme: str = "日常生活记录", targe
     date_dir = os.path.join(ROOT_DIR, project_id)
     update_progress(project_id, "story_script", 10, "准备素材信息...")
 
-    # 读取分析结果
-    analysis_path = os.path.join(date_dir, "analysis.json")
-    analysis = []
-    if os.path.exists(analysis_path):
-        with open(analysis_path, encoding="utf-8") as f:
-            analysis = json.load(f)
+    # 读取 shots（优先）或 analysis（兼容）
+    shots_path = os.path.join(date_dir, "shots.json")
+    shots = []
+    if os.path.exists(shots_path):
+        with open(shots_path, encoding="utf-8") as f:
+            shots_data = json.load(f)
+            shots = shots_data.get("shots", [])
+    else:
+        analysis_path = os.path.join(date_dir, "analysis.json")
+        if os.path.exists(analysis_path):
+            with open(analysis_path, encoding="utf-8") as f:
+                analysis = json.load(f)
+            # 转换为 shots 格式
+            for seg in analysis:
+                shots.append({
+                    "shot_id": seg.get("file", "unknown") + "_s001",
+                    "source": seg.get("file", ""),
+                    "start": seg.get("start", 0),
+                    "end": seg.get("end", 0),
+                    "duration": seg.get("duration", 0),
+                    "visual_summary": seg.get("action", ""),
+                    "shot_types": [],
+                    "garden_objects": seg.get("subjects", []),
+                    "actions": [],
+                    "quality": {"clarity": seg.get("quality_score", 6), "stability": seg.get("stability", 7), "exposure": 6, "composition": 6},
+                    "platform_scores": {"hook": 5, "beauty": seg.get("quality_score", 5), "action": 3, "story": 5, "retention": 5},
+                    "recommended_use": [_role_to_use(seg.get("story_role", "action"))],
+                    "delete": False,
+                    "delete_reason": "",
+                })
 
     # 读取转写结果
     transcription_path = os.path.join(date_dir, "transcription.json")
@@ -884,10 +1044,37 @@ def stage_story_script(project_id: str, theme: str = "日常生活记录", targe
         with open(transcription_path, encoding="utf-8") as f:
             transcriptions = json.load(f)
 
-    # 构建素材描述
+    # 构建素材描述 — 按推荐用途分组
     materials = ""
-    for seg in analysis:
-        materials += f"- {seg.get('file', '?')}: {seg.get('action', '?')} | 画面元素: {', '.join(seg.get('subjects', []))} | 质量:{seg.get('quality_score', 5)}/10 | 隐私风险:{seg.get('privacy_risk', 1)}/10\n"
+    by_use = {"开头": [], "结尾": [], "封面": [], "中段快切": [], "情感高潮": [], "环境交代": [], "细节展示": [], "过渡": []}
+    for shot in shots:
+        if shot.get("delete"):
+            continue
+        for use in shot.get("recommended_use", []):
+            if use in by_use:
+                by_use[use].append(shot)
+
+    for use, use_shots in by_use.items():
+        if use_shots:
+            materials += f"\n## 推荐做「{use}」的素材:\n"
+            for s in use_shots:
+                ps = s.get("platform_scores", {})
+                q = s.get("quality", {})
+                materials += (f"- [{s.get('shot_id', '?')}] {s.get('source', '?')} "
+                              f"({s.get('start', 0):.1f}-{s.get('end', 0):.1f}s): "
+                              f"{s.get('visual_summary', '?')} | "
+                              f"类型:{','.join(s.get('shot_types', []))} | "
+                              f"质量:{sum(q.values())/max(len(q),1):.0f}/10 "
+                              f"hook:{ps.get('hook',5)} beauty:{ps.get('beauty',5)} "
+                              f"story:{ps.get('story',5)}\n")
+
+    # 未分类的 shots
+    uncategorized = [s for s in shots if not s.get("delete") and not any(
+        use in by_use for use in s.get("recommended_use", []))]
+    if uncategorized:
+        materials += "\n## 其他素材:\n"
+        for s in uncategorized:
+            materials += f"- [{s.get('shot_id', '?')}] {s.get('source', '?')} ({s.get('start', 0):.1f}-{s.get('end', 0):.1f}s): {s.get('visual_summary', '?')}\n"
 
     # 构建转写文本
     transcription_text = ""
@@ -1317,79 +1504,122 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
 
         return {"plan": plan}
 
-    # 没有故事脚本，从分析结果生成
-    analysis_path = os.path.join(date_dir, "analysis.json")
-    if not os.path.exists(analysis_path):
+    # 没有故事脚本，从 shots 或 analysis 结果生成
+    shots_path = os.path.join(date_dir, "shots.json")
+    shots = []
+    if os.path.exists(shots_path):
+        with open(shots_path, encoding="utf-8") as f:
+            shots_data = json.load(f)
+            shots = shots_data.get("shots", [])
+    else:
+        analysis_path = os.path.join(date_dir, "analysis.json")
+        if os.path.exists(analysis_path):
+            with open(analysis_path, encoding="utf-8") as f:
+                analysis = json.load(f)
+            # 转换为 shots 格式
+            for seg in analysis:
+                shots.append({
+                    "shot_id": seg.get("file", "unknown") + "_s001",
+                    "source": seg.get("file", ""),
+                    "start": seg.get("start", 0),
+                    "end": seg.get("end", 0),
+                    "duration": seg.get("duration", 0),
+                    "visual_summary": seg.get("action", ""),
+                    "shot_types": [],
+                    "garden_objects": seg.get("subjects", []),
+                    "actions": [],
+                    "quality": {"clarity": seg.get("quality_score", 6), "stability": seg.get("stability", 7), "exposure": 6, "composition": 6},
+                    "platform_scores": {"hook": 5, "beauty": seg.get("quality_score", 5), "action": 3, "story": 5, "retention": 5},
+                    "recommended_use": [_role_to_use(seg.get("story_role", "action"))],
+                    "delete": False,
+                    "delete_reason": "",
+                })
+
+    if not shots:
         return {"error": "没有故事脚本或分析结果"}
 
-    with open(analysis_path, encoding="utf-8") as f:
-        analysis = json.load(f)
-
-    # 评分排序
-    for seg in analysis:
-        seg["_score"] = (
-            seg.get("quality_score", 5) * 0.30 +
-            min(10, len(seg.get("action", "")) / 2) * 0.25 +
-            (8 if seg.get("story_role") in [s["role"] for s in STORY_SLOTS] else 5) * 0.20 +
-            seg.get("stability", 7) * 0.10 +
-            (8 if any(k in seg.get("action", "") for k in {"花", "草", "树", "剪", "种", "浇"}) else 4) * 0.10
+    # 评分排序 — 使用 platform_scores 加权
+    for shot in shots:
+        ps = shot.get("platform_scores", {})
+        q = shot.get("quality", {})
+        # 综合评分：platform 加权 + 质量加权
+        platform_score = (
+            ps.get("hook", 5) * 0.25 +
+            ps.get("beauty", 5) * 0.20 +
+            ps.get("story", 5) * 0.25 +
+            ps.get("retention", 5) * 0.20 +
+            ps.get("action", 5) * 0.10
         )
-        if seg.get("privacy_risk", 1) >= 5:
-            seg["_score"] -= (seg["privacy_risk"] - 4) * 2
+        quality_score = sum(q.values()) / max(len(q), 1) if q else 6
+        shot["_score"] = platform_score * 0.6 + quality_score * 0.4
+        # 跳过标记删除的
+        if shot.get("delete"):
+            shot["_score"] = -1
 
-    # 按角色选最佳
-    by_role = {}
-    for seg in analysis:
-        role = seg.get("story_role", "action")
-        by_role.setdefault(role, []).append(seg)
-    for role in by_role:
-        by_role[role].sort(key=lambda s: s["_score"], reverse=True)
-
+    # 按 story slot 的推荐用途匹配最佳 shots
     selected = []
+    used_sources = set()
+
     for slot in STORY_SLOTS:
-        candidates = by_role.get(slot["role"], [])
+        role = slot["role"]
+        use = _role_to_use(role)
+        # 找推荐用途匹配的 shots
+        candidates = [s for s in shots
+                      if not s.get("delete")
+                      and use in s.get("recommended_use", [])
+                      and s.get("source") not in used_sources]
+        if not candidates:
+            # 退而求其次，找 story_role 匹配的
+            candidates = [s for s in shots
+                          if not s.get("delete")
+                          and s.get("source") not in used_sources]
         if candidates:
+            candidates.sort(key=lambda s: s["_score"], reverse=True)
             chosen = candidates[0]
-            if not any(s.get("file") == chosen.get("file") for s in selected):
-                selected.append(chosen)
+            selected.append(chosen)
+            used_sources.add(chosen.get("source", ""))
 
     # 填充不足
     if len(selected) < 4:
-        for seg in sorted(analysis, key=lambda s: s["_score"], reverse=True):
+        for shot in sorted(shots, key=lambda s: s["_score"], reverse=True):
             if len(selected) >= len(STORY_SLOTS):
                 break
-            if not any(s.get("file") == seg.get("file") for s in selected):
-                selected.append(seg)
+            if shot.get("delete"):
+                continue
+            if shot.get("source") not in used_sources:
+                selected.append(shot)
+                used_sources.add(shot.get("source", ""))
 
     raw_dir = os.path.join(date_dir, "raw")
     plan_clips = []
     timeline_pos = 0.0
-    for seg in selected:
-        src_name = seg.get("file", "")
+    for i, shot in enumerate(selected):
+        src_name = shot.get("source", "")
         src_path = os.path.join(raw_dir, src_name)
         if not os.path.exists(src_path):
             continue
         info = get_video_info(src_path)
-        dur = float(seg.get("duration", seg.get("end", 10) - seg.get("start", 0)))
+        dur = float(shot.get("duration", shot.get("end", 10) - shot.get("start", 0)))
+        role = STORY_SLOTS[i % len(STORY_SLOTS)]["role"] if i < len(STORY_SLOTS) else "action"
 
         plan_clips.append({
-            "role": seg.get("story_role", "action"),
+            "role": role,
             "source": src_name,
             "source_path": src_path,
             "source_duration": info.get("duration", 0),
             "source_has_audio": info.get("has_audio", False),
-            "start": float(seg.get("start", 0)),
-            "end": float(seg.get("end", dur)),
+            "start": float(shot.get("start", 0)),
+            "end": float(shot.get("end", dur)),
             "duration": dur,
             "timeline_start": timeline_pos,
             "timeline_end": timeline_pos + dur,
-            "caption": seg.get("caption", ""),
-            "note": seg.get("action", ""),
+            "caption": shot.get("visual_summary", ""),
+            "note": f"shot: {shot.get('shot_id', '?')}",
         })
         timeline_pos += dur
 
     plan = {
-        "version": "auto-plan-v1",
+        "version": "auto-plan-v2",
         "created_at": datetime.datetime.now().isoformat(),
         "title": f"{theme}记录",
         "raw_dir": raw_dir,
