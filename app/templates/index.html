@@ -262,7 +262,8 @@ a { color: var(--accent); text-decoration: none; }
         <button class="btn" onclick="runStage('transcription')">🎙️ 转字幕</button>
         <button class="btn" onclick="runStage('story-script')">📝 剧本</button>
         <button class="btn" onclick="runStage('edit-plan')">📋 剪辑计划</button>
-        <button class="btn green" onclick="runStage('render')">🎬 渲染</button>
+        <button class="btn" onclick="runRender('draft')">📝 草稿渲染</button>
+        <button class="btn green" onclick="runRender('publish')">🎬 发布渲染</button>
         <button class="btn" onclick="runStage('publish-pack')">📦 发布包</button>
       </div>
       <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
@@ -867,6 +868,36 @@ async function runStage(stage) {
       alert('错误: ' + data.error);
     }
     // Reload project data
+    await openProject(currentProject);
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+    hideProgress();
+  }
+}
+
+async function runRender(mode) {
+  if (!currentProject) return;
+  const btn = event.target;
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span>' + origText;
+
+  showProgress();
+  connectSSE();
+
+  try {
+    const res = await fetch(`${API}/api/projects/${currentProject}/render`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, burn_subtitles: true, audio_mode: 'source', show_debug_overlay: mode === 'draft' }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('错误: ' + data.error);
+    }
     await openProject(currentProject);
   } catch (e) {
     alert('请求失败: ' + e.message);

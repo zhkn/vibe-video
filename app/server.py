@@ -178,6 +178,19 @@ OUTPUT_SPEC = {
     "audio_sample_rate": 44100,
 }
 
+# 草稿模式：720p、快速 preset、带调试信息
+DRAFT_SPEC = {
+    "width": 720,
+    "height": 1280,
+    "fps": 24,
+    "codec": "libx264",
+    "crf": 26,
+    "preset": "ultrafast",
+    "min_duration": 55,
+    "max_duration": 75,
+    "audio_sample_rate": 22050,
+}
+
 # 全局进度追踪
 progress_store: dict[str, dict] = {}
 progress_lock = threading.Lock()
@@ -1524,8 +1537,12 @@ def _fallback_story_script(project_id: str, theme: str) -> dict:
 # Stage 7: 视频渲染
 # ═══════════════════════════════════════════════════════════
 
-def stage_render(project_id: str, burn_subtitles: bool = True, audio_mode: str = "source") -> dict:
-    """渲染最终视频"""
+def stage_render(project_id: str, burn_subtitles: bool = True, audio_mode: str = "source",
+                 mode: str = "publish", show_debug_overlay: bool = False) -> dict:
+    """渲染最终视频
+    mode: "draft" (720p快速预览) 或 "publish" (1080p正式版)
+    show_debug_overlay: 草稿模式下是否显示调试信息
+    """
     date_dir = os.path.join(ROOT_DIR, project_id)
     raw_dir = os.path.join(date_dir, "raw")
     out_dir = ensure_dir(date_dir, "outputs")
@@ -1551,9 +1568,13 @@ def stage_render(project_id: str, burn_subtitles: bool = True, audio_mode: str =
     if not clips:
         return {"error": "没有可渲染的片段"}
 
-    update_progress(project_id, "render", 5, f"准备渲染 {len(clips)} 个片段...")
+    is_draft = mode == "draft"
+    if is_draft:
+        show_debug_overlay = True
 
-    spec = OUTPUT_SPEC
+    update_progress(project_id, "render", 5, f"{'草稿' if is_draft else '发布'}模式渲染 {len(clips)} 个片段...")
+
+    spec = DRAFT_SPEC if is_draft else OUTPUT_SPEC
     w, h, fps = spec["width"], spec["height"], spec["fps"]
     crf, preset = spec["crf"], spec["preset"]
     sr = spec["audio_sample_rate"]
@@ -1586,6 +1607,21 @@ def stage_render(project_id: str, burn_subtitles: bool = True, audio_mode: str =
 
         vf = (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
               f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p")
+
+        # 草稿模式：叠加调试信息
+        if show_debug_overlay:
+            role = clip.get('role', '?')
+            caption = clip.get('caption', '')[:20]
+            debug_text = f"#{i+1} {role} {start:.1f}-{end:.1f}s {caption}"
+            # 转义 ffmpeg drawtext 特殊字符
+            debug_text = debug_text.replace("'", "\\'").replace(":", "\\:")
+            vf += (f",drawtext=text='{debug_text}'"
+                   f":fontsize=18:fontcolor=white:borderw=2:bordercolor=black"
+                   f":x=10:y=10")
+            # 时间码
+            vf += (f",drawtext=text='%{{pts\\:hms}}'"
+                   f":fontsize=14:fontcolor=yellow:borderw=1:bordercolor=black"
+                   f":x=10:y=40")
 
         if audio_mode == "source" and has_audio:
             cmd = [
@@ -1639,7 +1675,8 @@ def stage_render(project_id: str, burn_subtitles: bool = True, audio_mode: str =
             escaped = str(os.path.abspath(clip_path)).replace("'", "'\\''")
             f.write(f"file '{escaped}'\n")
 
-    rough_cut = os.path.join(out_dir, "rough_cut.mp4")
+    output_name = "draft_cut.mp4" if is_draft else "rough_cut.mp4"
+    rough_cut = os.path.join(out_dir, output_name)
     run_cmd([
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
@@ -2402,9 +2439,12 @@ def api_publish_pack(project_id):
 def api_render(project_id):
     burn = request.json.get("burn_subtitles", True) if request.json else True
     audio_mode = request.json.get("audio_mode", "source") if request.json else "source"
+    mode = request.json.get("mode", "publish") if request.json else "publish"
+    show_debug = request.json.get("show_debug_overlay", False) if request.json else False
     def run():
         try:
-            return stage_render(project_id, burn_subtitles=burn, audio_mode=audio_mode)
+            return stage_render(project_id, burn_subtitles=burn, audio_mode=audio_mode,
+                               mode=mode, show_debug_overlay=show_debug)
         except Exception as e:
             return {"error": str(e)}
     return jsonify(run())
