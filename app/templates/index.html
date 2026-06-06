@@ -263,6 +263,7 @@ a { color: var(--accent); text-decoration: none; }
         <button class="btn" onclick="runStage('story-script')">📝 剧本</button>
         <button class="btn" onclick="runStage('edit-plan')">📋 剪辑计划</button>
         <button class="btn green" onclick="runStage('render')">🎬 渲染</button>
+        <button class="btn" onclick="runStage('publish-pack')">📦 发布包</button>
       </div>
       <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
       <div class="progress-text" id="progressText"></div>
@@ -276,6 +277,7 @@ a { color: var(--accent); text-decoration: none; }
       <div class="tab" data-tab="transcription">🎙️ 字幕转写</div>
       <div class="tab" data-tab="script">📝 剧情脚本</div>
       <div class="tab" data-tab="edit-plan">📋 剪辑计划</div>
+      <div class="tab" data-tab="publish-pack">📦 发布包</div>
       <div class="tab" data-tab="output">🎬 输出</div>
     </div>
 
@@ -287,6 +289,7 @@ a { color: var(--accent); text-decoration: none; }
       <div class="tab-content" id="tc-transcription"></div>
       <div class="tab-content" id="tc-script"></div>
       <div class="tab-content" id="tc-edit-plan"></div>
+      <div class="tab-content" id="tc-publish-pack"></div>
       <div class="tab-content" id="tc-output"></div>
     </div>
   </div>
@@ -458,6 +461,14 @@ function renderProject(data) {
     tep.innerHTML = '<div class="empty"><div class="icon">📋</div><div class="msg">尚未生成剪辑计划</div></div>';
   }
 
+  // Publish Pack
+  const tp = document.getElementById('tc-publish-pack');
+  if (data.publish_pack) {
+    tp.innerHTML = renderPublishPack(data.publish_pack);
+  } else {
+    tp.innerHTML = '<div class="empty"><div class="icon">📦</div><div class="msg">尚未生成发布包</div></div>';
+  }
+
   // Output
   const to = document.getElementById('tc-output');
   if (data.outputs && Object.keys(data.outputs).length > 0) {
@@ -557,6 +568,68 @@ function renderScript(script) {
     <div class="status" id="script-save-status"></div>
   </div>`;
 
+  return html;
+}
+
+function renderPublishPack(pack) {
+  let html = `<div class="script-card">
+    <div class="title">📦 发布包</div>`;
+
+  // 标题候选
+  if (pack.title_candidates) {
+    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px">📝 标题候选</div>`;
+    pack.title_candidates.forEach((t, i) => {
+      html += `<div style="padding:8px 12px;background:var(--bg3);border-radius:6px;margin-bottom:6px;font-size:15px;${i===0?'border-left:3px solid var(--accent);font-weight:600':''}">${esc(t)}</div>`;
+    });
+    html += '</div>';
+  }
+
+  // 封面文字
+  if (pack.cover_text_candidates) {
+    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px">🖼️ 封面文字候选</div>`;
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+    pack.cover_text_candidates.forEach(t => {
+      html += `<span style="background:var(--bg3);border:1px solid var(--border);padding:6px 12px;border-radius:6px;font-size:14px;font-weight:600">${esc(t)}</span>`;
+    });
+    html += '</div></div>';
+  }
+
+  // 简介
+  if (pack.description) {
+    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px">📄 简介</div>
+      <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;font-size:14px">${esc(pack.description)}</div></div>`;
+  }
+
+  // 话题标签
+  if (pack.hashtags) {
+    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px"># 话题标签</div>`;
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap">';
+    pack.hashtags.forEach(t => {
+      html += `<span style="background:rgba(88,166,255,0.15);color:var(--accent);padding:4px 10px;border-radius:12px;font-size:13px">#${esc(t)}</span>`;
+    });
+    html += '</div></div>';
+  }
+
+  // 评论引导
+  if (pack.comment_prompt) {
+    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px">💬 评论引导</div>
+      <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;font-size:14px;color:var(--accent3)">${esc(pack.comment_prompt)}</div></div>`;
+  }
+
+  // 平台备注
+  if (pack.platform_notes) {
+    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px">📱 平台发布备注</div>`;
+    const platformNames = {douyin: '🎵 抖音', xiaohongshu: '📕 小红书', shipinhao: '📺 视频号'};
+    for (const [key, note] of Object.entries(pack.platform_notes)) {
+      html += `<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span style="min-width:80px;font-size:13px;color:var(--accent)">${platformNames[key] || key}</span>
+        <span style="font-size:13px;color:var(--text2)">${esc(note)}</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  html += '</div>';
   return html;
 }
 

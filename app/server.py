@@ -370,6 +370,7 @@ def get_project_data(project_id: str) -> dict:
         "transcription": load_json("transcription.json"),
         "story_script": load_json("story_script.json"),
         "edit_plan": load_json("edit_plan.json"),
+        "publish_pack": load_json("publish_pack.json"),
         "outputs": outputs,
     }
 
@@ -1843,6 +1844,145 @@ def stage_edit_plan(project_id: str, theme: str = "日常生活记录") -> dict:
 
 
 # ═══════════════════════════════════════════════════════════
+# Stage 9: 发布包生成
+# ═══════════════════════════════════════════════════════════
+
+PUBLISH_PACK_PROMPT = """你是短视频发布专家。根据以下视频信息，生成发布包。
+
+## 视频信息
+- 标题: {title}
+- 副标题: {subtitle}
+- 故事线: {storyline}
+- 模板: {template_name}
+- 调性: {tone}
+- 时长: {duration}秒
+- 片段描述: {clips_desc}
+
+## 生成要求
+输出 JSON，包含：
+- title_candidates: 3个标题候选（口语化、有悬念、15字以内）
+- cover_text_candidates: 3个封面文字候选（6-8个字，干净有力）
+- description: 一段发布简介（30字以内，自然不做作）
+- hashtags: 4-6个话题标签
+- comment_prompt: 一条引导评论的互动问题（15字以内）
+- platform_notes: 抖音/小红书/视频号各自的发布注意事项
+
+请直接输出 JSON，不要其他文字。"""
+
+
+def stage_publish_pack(project_id: str, theme: str = "日常生活记录") -> dict:
+    """生成发布包：标题、封面字、简介、话题、评论引导"""
+    import openai
+
+    date_dir = os.path.join(ROOT_DIR, project_id)
+    update_progress(project_id, "publish_pack", 10, "准备发布包...")
+
+    # 读取已有数据
+    script = {}
+    script_path = os.path.join(date_dir, "story_script.json")
+    if os.path.exists(script_path):
+        with open(script_path, encoding="utf-8") as f:
+            script = json.load(f)
+
+    plan = {}
+    plan_path = os.path.join(date_dir, "edit_plan.json")
+    if os.path.exists(plan_path):
+        with open(plan_path, encoding="utf-8") as f:
+            plan = json.load(f)
+
+    template_data = {}
+    template_path = os.path.join(date_dir, "video_template.json")
+    if os.path.exists(template_path):
+        with open(template_path, encoding="utf-8") as f:
+            template_data = json.load(f)
+
+    # 构建片段描述
+    clips_desc = ""
+    for clip in plan.get("clips", [])[:8]:
+        clips_desc += f"- [{clip.get('role', '?')}] {clip.get('caption', '?')} ({clip.get('start', 0):.1f}-{clip.get('end', 0):.1f}s)\n"
+
+    # 尝试 AI 生成
+    xiaomi_key = os.environ.get("XIAOMI_API_KEY", "")
+    xiaomi_base = os.environ.get("XIAOMI_BASE_URL", "")
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    openai_base = os.environ.get("OPENAI_BASE_URL", "")
+
+    api_key = xiaomi_key or openai_key
+    base_url = xiaomi_base or openai_base
+    model = os.environ.get("STORY_MODEL", "mimo-v2.5-pro")
+
+    pack = None
+    if api_key:
+        try:
+            prompt = PUBLISH_PACK_PROMPT.format(
+                title=script.get("title", f"{theme}记录"),
+                subtitle=script.get("subtitle", ""),
+                storyline=script.get("storyline", ""),
+                template_name=template_data.get("template_name", ""),
+                tone=script.get("tone", ""),
+                duration=plan.get("actual_duration", 60),
+                clips_desc=clips_desc or "(无片段信息)",
+            )
+
+            client_kwargs = {"api_key": api_key}
+            if base_url:
+                client_kwargs["base_url"] = base_url
+            client = openai.OpenAI(**client_kwargs)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2048,
+                temperature=0.8,
+            )
+            text = response.choices[0].message.content.strip()
+
+            # 提取 JSON
+            depth = 0
+            start = -1
+            for ci, ch in enumerate(text):
+                if ch == '{':
+                    if depth == 0:
+                        start = ci
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0 and start >= 0:
+                        try:
+                            pack = json.loads(text[start:ci+1])
+                            break
+                        except json.JSONDecodeError:
+                            start = -1
+        except Exception as e:
+            print(f"  Publish pack API 错误: {e}")
+
+    # Fallback: 从已有数据构建
+    if not pack:
+        title = script.get("title", f"{theme}记录")
+        pack = {
+            "title_candidates": [title, f"今天的{theme}", f"{theme}小记"],
+            "cover_text_candidates": [title[:8], f"{theme}了", "整理完了"],
+            "description": script.get("storyline", f"记录{theme}的过程"),
+            "hashtags": [theme, "生活记录", "花园", "日常"],
+            "comment_prompt": "你喜欢这样的生活吗？",
+            "platform_notes": {
+                "douyin": "标题口语化，前3秒放最吸引人的画面",
+                "xiaohongshu": "封面字干净，简介补充花草名称",
+                "shipinhao": "节奏可以略慢，保留生活感",
+            },
+        }
+
+    # 保存
+    pack["project_id"] = project_id
+    pack["generated_at"] = datetime.datetime.now().isoformat()
+    pack_path = os.path.join(date_dir, "publish_pack.json")
+    with open(pack_path, "w", encoding="utf-8") as f:
+        json.dump(pack, f, ensure_ascii=False, indent=2)
+
+    update_progress(project_id, "publish_pack", 100, "发布包生成完成")
+    return pack
+
+
+# ═══════════════════════════════════════════════════════════
 # 全流程
 # ═══════════════════════════════════════════════════════════
 
@@ -1882,6 +2022,10 @@ def run_full_pipeline(project_id: str, theme: str = "日常生活记录", target
         # Stage 8: 渲染
         update_progress(project_id, "pipeline", 85, "渲染视频...")
         results["stages"]["render"] = stage_render(project_id)
+
+        # Stage 9: 发布包
+        update_progress(project_id, "pipeline", 95, "生成发布包...")
+        results["stages"]["publish_pack"] = stage_publish_pack(project_id, theme)
 
         update_progress(project_id, "pipeline", 100, "✅ 全流程完成!")
     except Exception as e:
@@ -2061,6 +2205,17 @@ def api_edit_plan(project_id):
     def run():
         try:
             return stage_edit_plan(project_id, theme)
+        except Exception as e:
+            return {"error": str(e)}
+    return jsonify(run())
+
+
+@app.route("/api/projects/<path:project_id>/publish-pack", methods=["POST"])
+def api_publish_pack(project_id):
+    theme = request.json.get("theme", "日常生活记录") if request.json else "日常生活记录"
+    def run():
+        try:
+            return stage_publish_pack(project_id, theme)
         except Exception as e:
             return {"error": str(e)}
     return jsonify(run())
