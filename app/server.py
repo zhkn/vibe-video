@@ -37,57 +37,12 @@ from typing import Optional
 
 from flask import Flask, jsonify, request, send_from_directory, Response, render_template
 
-# Pydantic 校验模型
-try:
-    from pydantic import BaseModel, Field, validator
-    HAS_PYDANTIC = True
-
-    class QualityScores(BaseModel):
-        clarity: int = Field(5, ge=1, le=10)
-        stability: int = Field(5, ge=1, le=10)
-        exposure: int = Field(5, ge=1, le=10)
-        composition: int = Field(5, ge=1, le=10)
-
-    class PlatformScores(BaseModel):
-        hook: int = Field(5, ge=1, le=10)
-        retention: int = Field(5, ge=1, le=10)
-        action: int = Field(5, ge=1, le=10)
-        beauty: int = Field(5, ge=1, le=10)
-        clarity: int = Field(5, ge=1, le=10)
-        contrast: int = Field(5, ge=1, le=10)
-        story_value: int = Field(5, ge=1, le=10)
-        cover_value: int = Field(5, ge=1, le=10)
-
-    class ShotAnalysis(BaseModel):
-        shot_id: str = ""
-        source: str
-        start: float = 0.0
-        end: float = 0.0
-        duration: float = 0.0
-        visual_summary: str = ""
-        shot_types: list[str] = Field(default_factory=list)
-        garden_objects: list[str] = Field(default_factory=list)
-        actions: list[str] = Field(default_factory=list)
-        quality: QualityScores = Field(default_factory=QualityScores)
-        platform_scores: PlatformScores = Field(default_factory=PlatformScores)
-        recommended_use: list[str] = Field(default_factory=list)
-        delete: bool = False
-        delete_reason: str = ""
-
-        @validator("source", pre=True)
-        def source_must_be_str(cls, v):
-            return str(v) if v else "unknown"
-
-    class ShotsResponse(BaseModel):
-        shots: list[ShotAnalysis]
-
-except ImportError:
-    HAS_PYDANTIC = False
-    # 兼容：没有 pydantic 时用 dict
-    class ShotAnalysis:
-        pass
-    class ShotsResponse:
-        pass
+from app.schemas import (
+    ShotAnalysis, PlatformScores, QualityScores, ShotsResponse,
+    VideoTemplateDecision, EditPlan, EditClip, PublishPack,
+    PerformanceRecord, AnalysisSegment, validate_shots, HAS_PYDANTIC,
+)
+from app.json_utils import load_json, atomic_write_json, extract_json_from_text
 
 # ═══════════════════════════════════════════════════════════
 # 配置
@@ -816,35 +771,16 @@ def stage_visual_analysis(project_id: str, theme: str = "日常生活记录") ->
             )
             text = response.choices[0].message.content.strip()
 
-            # 提取 JSON — 健壮的括号匹配
-            depth = 0
-            start = -1
-            for ci, ch in enumerate(text):
-                if ch == '{':
-                    if depth == 0:
-                        start = ci
-                    depth += 1
-                elif ch == '}':
-                    depth -= 1
-                    if depth == 0 and start >= 0:
-                        try:
-                            parsed = json.loads(text[start:ci+1])
-                            if isinstance(parsed, dict) and "shots" in parsed:
-                                shots = parsed["shots"]
-                            elif isinstance(parsed, list):
-                                shots = parsed
-                            else:
-                                shots = [parsed]
-                            break
-                        except json.JSONDecodeError:
-                            start = -1
+            # 提取 JSON
+            parsed = extract_json_from_text(text)
+            if parsed is None:
+                shots = []
+            elif isinstance(parsed, dict) and "shots" in parsed:
+                shots = parsed["shots"]
+            elif isinstance(parsed, list):
+                shots = parsed
             else:
-                # fallback: 正则匹配数组
-                json_match = re.search(r'\[.*\]', text, re.DOTALL)
-                if json_match:
-                    shots = json.loads(json_match.group())
-                else:
-                    shots = []
+                shots = [parsed]
 
             # 校验：如果解析出的 shots 数量合理，跳出重试
             if shots and len(shots) > 0:
@@ -860,7 +796,7 @@ def stage_visual_analysis(project_id: str, theme: str = "日常生活记录") ->
                 shots = _fallback_visual_analysis(project_id)
 
     # Pydantic 校验
-    shots = _validate_shots(shots)
+    shots = validate_shots(shots)
 
     # 确保每个 shot 有 shot_id
     for i, shot in enumerate(shots):
@@ -873,70 +809,15 @@ def stage_visual_analysis(project_id: str, theme: str = "日常生活记录") ->
         "project_id": project_id,
         "shots": shots,
     }
-    shots_path = os.path.join(date_dir, "shots.json")
-    with open(shots_path, "w", encoding="utf-8") as f:
-        json.dump(shots_data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(os.path.join(date_dir, "shots.json"), shots_data)
 
     # 向后兼容：同时生成 analysis.json（扁平化，每个 source 取最佳 shot）
     analysis = _shots_to_analysis(shots)
-    analysis_path = os.path.join(date_dir, "analysis.json")
-    with open(analysis_path, "w", encoding="utf-8") as f:
-        json.dump(analysis, f, ensure_ascii=False, indent=2)
+    atomic_write_json(os.path.join(date_dir, "analysis.json"), analysis)
 
     update_progress(project_id, "visual_analysis", 100, f"视觉分析完成: {len(shots)} 个 shots")
     return {"shots": shots, "count": len(shots)}
 
-
-def _validate_shots(raw_shots: list[dict]) -> list[dict]:
-    """校验并修正 shots 数据"""
-    if not HAS_PYDANTIC:
-        # 无 pydantic 时做基本修正
-        validated = []
-        for s in raw_shots:
-            if not isinstance(s, dict):
-                continue
-            s.setdefault("source", "unknown")
-            s.setdefault("shot_id", "")
-            s.setdefault("start", 0.0)
-            s.setdefault("end", 0.0)
-            s.setdefault("duration", 0.0)
-            s.setdefault("visual_summary", "")
-            s.setdefault("shot_types", [])
-            s.setdefault("garden_objects", [])
-            s.setdefault("actions", [])
-            s.setdefault("quality", {"clarity": 5, "stability": 5, "exposure": 5, "composition": 5})
-            s.setdefault("platform_scores", {"hook": 5, "retention": 5, "action": 5, "beauty": 5, "clarity": 5, "contrast": 5, "story_value": 5, "cover_value": 5})
-            s.setdefault("recommended_use", [])
-            s.setdefault("delete", False)
-            s.setdefault("delete_reason", "")
-            validated.append(s)
-        return validated
-
-    validated = []
-    for s in raw_shots:
-        if not isinstance(s, dict):
-            continue
-        try:
-            shot = ShotAnalysis(**s)
-            validated.append(shot.dict())
-        except Exception as e:
-            # 尝试修正常见问题后重试
-            try:
-                # 修正 platform_scores 字段名
-                if "platform_scores" in s and isinstance(s["platform_scores"], dict):
-                    ps = s["platform_scores"]
-                    # 兼容旧字段名
-                    if "story" in ps and "story_value" not in ps:
-                        ps["story_value"] = ps.pop("story")
-                    # 填充缺失字段
-                    for k in ["hook", "retention", "action", "beauty", "clarity", "contrast", "story_value", "cover_value"]:
-                        ps.setdefault(k, 5)
-                shot = ShotAnalysis(**s)
-                validated.append(shot.dict())
-            except Exception as e2:
-                print(f"  Shot 校验失败，跳过: {e2}")
-                continue
-    return validated
 
 
 def _shots_to_analysis(shots: list[dict]) -> list[dict]:
@@ -2151,21 +2032,7 @@ def stage_publish_pack(project_id: str, theme: str = "日常生活记录") -> di
             text = response.choices[0].message.content.strip()
 
             # 提取 JSON
-            depth = 0
-            start = -1
-            for ci, ch in enumerate(text):
-                if ch == '{':
-                    if depth == 0:
-                        start = ci
-                    depth += 1
-                elif ch == '}':
-                    depth -= 1
-                    if depth == 0 and start >= 0:
-                        try:
-                            pack = json.loads(text[start:ci+1])
-                            break
-                        except json.JSONDecodeError:
-                            start = -1
+            pack = extract_json_from_text(text)
         except Exception as e:
             print(f"  Publish pack API 错误: {e}")
 
