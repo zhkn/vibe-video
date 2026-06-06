@@ -1,0 +1,26 @@
+{
+  "title": "测试花园记录",
+  "subtitle": "日常美好",
+  "storyline": "记录花园整理的过程",
+  "tone": "清新治愈",
+  "duration_target": 60,
+  "music_style": "轻音乐",
+  "voiceover": false,
+  "clips": [
+    {
+      "id": "001_opening",
+      "role": "opening",
+      "source": "test_video.MP4",
+      "start": 0.0,
+      "end": 5.0,
+      "duration": 5.0,
+      "caption": "花园全景",
+      "voiceover_text": "",
+      "transition": "cut",
+      "note": "开场"
+    }
+  ],
+  "total_duration": 5.0,
+  "ending_caption": "今天就到这里。",
+  "hashtags": ["花园", "测试"]
+}

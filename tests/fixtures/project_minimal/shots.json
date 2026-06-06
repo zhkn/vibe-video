@@ -1,0 +1,65 @@
+{
+  "project_id": "2026-06-07/test-project",
+  "shots": [
+    {
+      "shot_id": "test_video_s001",
+      "source": "test_video.MP4",
+      "start": 0.0,
+      "end": 5.0,
+      "duration": 5.0,
+      "visual_summary": "花园全景",
+      "shot_types": ["全景", "整理后"],
+      "garden_objects": ["花墙", "石板路"],
+      "actions": [],
+      "quality": {
+        "clarity": 8,
+        "stability": 7,
+        "exposure": 8,
+        "composition": 8
+      },
+      "platform_scores": {
+        "hook": 8,
+        "retention": 7,
+        "action": 3,
+        "beauty": 8,
+        "clarity": 8,
+        "contrast": 6,
+        "story_value": 7,
+        "cover_value": 8
+      },
+      "recommended_use": ["开头", "封面"],
+      "delete": false,
+      "delete_reason": ""
+    },
+    {
+      "shot_id": "test_video_s002",
+      "source": "test_video.MP4",
+      "start": 10.0,
+      "end": 18.0,
+      "duration": 8.0,
+      "visual_summary": "修剪枝叶动作",
+      "shot_types": ["中景", "动作过程"],
+      "garden_objects": ["剪刀", "绿植"],
+      "actions": ["修剪"],
+      "quality": {
+        "clarity": 7,
+        "stability": 6,
+        "exposure": 7,
+        "composition": 7
+      },
+      "platform_scores": {
+        "hook": 5,
+        "retention": 7,
+        "action": 9,
+        "beauty": 6,
+        "clarity": 7,
+        "contrast": 5,
+        "story_value": 8,
+        "cover_value": 4
+      },
+      "recommended_use": ["中段快切"],
+      "delete": false,
+      "delete_reason": ""
+    }
+  ]
+}

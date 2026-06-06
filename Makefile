@@ -1,4 +1,4 @@
-.PHONY: help install run dev clean
+.PHONY: help install install-dev run dev test lint format clean
 
 PYTHON ?= python3
 PORT ?= 8766
@@ -20,8 +20,11 @@ run: ## 启动服务 (默认端口 8766)
 dev: ## 开发模式启动 (自动重载)
 	FLASK_DEBUG=1 $(PYTHON) -m app.server --port $(PORT) --data-dir $(DATA_DIR)
 
+test: ## 运行测试
+	$(PYTHON) -m pytest tests/ -v
+
 lint: ## 代码检查
-	ruff check app/ scripts/
+	ruff check app/ scripts/ tests/
 
 format: ## 代码格式化
 	ruff format app/ scripts/

@@ -1,0 +1,15 @@
+[
+  {
+    "file": "test_video.MP4",
+    "start": 0.0,
+    "end": 5.0,
+    "duration": 5.0,
+    "action": "花园全景",
+    "subjects": ["花墙", "石板路"],
+    "story_role": "opening",
+    "quality_score": 8,
+    "stability": 7,
+    "privacy_risk": 1,
+    "caption": "花园全景"
+  }
+]
