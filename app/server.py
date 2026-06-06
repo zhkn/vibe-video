@@ -2858,6 +2858,91 @@ def api_import(project_id):
     return jsonify(run())
 
 
+@app.route("/api/projects/<path:project_id>/import-files", methods=["POST"])
+def api_import_files(project_id):
+    """导入指定文件到项目 raw 目录"""
+    data = request.json or {}
+    files = data.get("files", [])
+    if not files:
+        return error_response("NO_FILES", "未指定文件", status=400)
+
+    try:
+        # 确保项目目录存在
+        project_dir = resolve_project_dir(project_id)
+        raw_dir = os.path.join(project_dir, "raw")
+        os.makedirs(raw_dir, exist_ok=True)
+
+        imported = []
+        for fpath in files:
+            fpath = os.path.expanduser(fpath.strip())
+            if not os.path.isfile(fpath):
+                continue
+            ext = os.path.splitext(fpath)[1].lower()
+            if ext not in VIDEO_EXTS:
+                continue
+            fname = os.path.basename(fpath)
+            dst = os.path.join(raw_dir, fname)
+            if os.path.abspath(fpath) != os.path.abspath(dst):
+                shutil.copy2(fpath, dst)
+            imported.append(fname)
+
+        return jsonify({"imported": imported, "count": len(imported)})
+    except ValueError as e:
+        return error_response("INVALID_PROJECT", str(e), status=400)
+    except Exception as e:
+        return error_response("IMPORT_ERROR", str(e), status=500)
+
+
+@app.route("/api/scan-inbox", methods=["GET"])
+def api_scan_inbox():
+    """扫描 Inbox 目录中的视频"""
+    inbox = INBOX_DIR
+    if not os.path.isdir(inbox):
+        os.makedirs(inbox, exist_ok=True)
+        return jsonify({"videos": [], "inbox": inbox})
+
+    videos = []
+    for fname in sorted(os.listdir(inbox)):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in VIDEO_EXTS:
+            fpath = os.path.join(inbox, fname)
+            info = get_video_info(fpath)
+            videos.append({
+                "filename": fname,
+                "path": fpath,
+                **info,
+            })
+    return jsonify({"videos": videos, "inbox": inbox})
+
+
+@app.route("/api/scan-directory", methods=["POST"])
+def api_scan_directory():
+    """扫描指定目录中的视频"""
+    data = request.json or {}
+    dir_path = os.path.expanduser(data.get("path", "").strip())
+    if not dir_path or not os.path.isdir(dir_path):
+        return error_response("INVALID_DIR", f"目录不存在: {dir_path}", status=400)
+
+    # 安全检查：只允许扫描用户目录
+    home = os.path.expanduser("~")
+    real_path = os.path.realpath(dir_path)
+    if not real_path.startswith(home):
+        return error_response("ACCESS_DENIED", "只能扫描用户目录", status=403)
+
+    videos = []
+    for fname in sorted(os.listdir(dir_path)):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in VIDEO_EXTS:
+            fpath = os.path.join(dir_path, fname)
+            info = get_video_info(fpath)
+            videos.append({
+                "filename": fname,
+                "path": fpath,
+                **info,
+            })
+    return jsonify({"videos": videos, "directory": dir_path})
+
+
 @app.route("/api/projects/<path:project_id>/keyframes", methods=["POST"])
 def api_keyframes(project_id):
     fps = float(request.json.get("fps_interval", 2.0)) if request.json else 2.0

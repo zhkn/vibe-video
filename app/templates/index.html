@@ -240,6 +240,47 @@ a { color: var(--accent); text-decoration: none; }
     </div>
   </div>
 
+  <!-- Import Modal -->
+  <div class="modal-overlay" id="importModal">
+    <div class="modal" style="width:550px;max-height:80vh;overflow-y:auto">
+      <h3>📥 导入素材</h3>
+
+      <!-- Inbox 扫描 -->
+      <div style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:13px;color:var(--text2)">📂 Inbox 目录</span>
+          <button class="btn" style="font-size:12px;padding:4px 10px" onclick="scanInbox()">🔄 扫描</button>
+        </div>
+        <div id="inboxVideos" style="max-height:200px;overflow-y:auto">
+          <div style="color:var(--text2);font-size:13px">点击"扫描"查看 Inbox 中的视频</div>
+        </div>
+      </div>
+
+      <!-- 自定义路径 -->
+      <div style="margin-bottom:16px">
+        <div style="font-size:13px;color:var(--text2);margin-bottom:8px">📁 从其他目录导入</div>
+        <div style="display:flex;gap:8px">
+          <input type="text" class="edit-field" id="scanDirInput" placeholder="输入目录路径，如 ~/Desktop 或 /path/to/videos" style="flex:1">
+          <button class="btn" onclick="scanDirectory()">扫描</button>
+        </div>
+        <div id="dirVideos" style="max-height:150px;overflow-y:auto;margin-top:8px"></div>
+      </div>
+
+      <!-- 手动输入文件路径 -->
+      <div style="margin-bottom:16px">
+        <div style="font-size:13px;color:var(--text2);margin-bottom:8px">📝 直接输入文件路径 (每行一个)</div>
+        <textarea class="edit-field" id="manualPaths" rows="3" placeholder="/path/to/video1.mp4&#10;/path/to/video2.MOV" style="width:100%"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn" onclick="closeImportModal()">取消</button>
+        <button class="btn primary" onclick="importSelected()">导入所选</button>
+        <button class="btn green" onclick="importManual()">导入路径</button>
+      </div>
+      <div id="importStatus" style="font-size:12px;color:var(--text2);margin-top:8px"></div>
+    </div>
+  </div>
+
   <!-- Project Detail -->
   <div id="projectDetail" class="project-view">
     <div class="project-header">
@@ -257,6 +298,7 @@ a { color: var(--accent); text-decoration: none; }
             <option value="180">3分钟</option>
           </select>
         </div>
+        <button class="btn green" onclick="showImportModal()">📥 导入素材</button>
         <button class="btn primary" id="btnFullPipeline" onclick="runFullPipeline()">🎯 生成剪辑方案</button>
         <button class="btn" onclick="runStage('keyframes')">🎞️ 抽帧</button>
         <button class="btn" onclick="runStage('visual-analysis')">👁️ 分析</button>
@@ -384,7 +426,7 @@ function renderProject(data) {
       </div>
     `).join('') + '</div>';
   } else {
-    tc.innerHTML = '<div class="empty"><div class="icon">📹</div><div class="msg">暂无素材视频</div></div>';
+    tc.innerHTML = '<div class="empty"><div class="icon">📹</div><div class="msg">暂无素材视频<br><button class="btn green" style="margin-top:12px" onclick="showImportModal()">📥 导入素材</button></div></div>';
   }
 
   // Keyframes
@@ -1399,6 +1441,120 @@ async function createProject() {
 document.getElementById('createModal').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeCreateModal();
 });
+document.getElementById('importModal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeImportModal();
+});
+
+// ─── Import modal ───
+function showImportModal() {
+  if (!currentProject) { showToast('⚠️ 请先选择项目'); return; }
+  document.getElementById('importModal').classList.add('show');
+  document.getElementById('importStatus').textContent = '';
+  document.getElementById('inboxVideos').innerHTML = '<div style="color:var(--text2);font-size:13px">点击"扫描"查看 Inbox 中的视频</div>';
+  document.getElementById('dirVideos').innerHTML = '';
+  // 自动扫描 Inbox
+  scanInbox();
+}
+
+function closeImportModal() {
+  document.getElementById('importModal').classList.remove('show');
+}
+
+async function scanInbox() {
+  const container = document.getElementById('inboxVideos');
+  container.innerHTML = '<span class="spinner"></span> 扫描中...';
+  try {
+    const res = await fetch(`${API}/api/scan-inbox`);
+    const data = await res.json();
+    if (!data.videos || data.videos.length === 0) {
+      container.innerHTML = `<div style="color:var(--text2);font-size:13px">📭 Inbox 为空<br><span style="font-size:11px">将视频放入: ${esc(data.inbox || '~/Movies/GardenAutoCut/Inbox/')}</span></div>`;
+      return;
+    }
+    let html = `<div style="font-size:12px;color:var(--text2);margin-bottom:6px">找到 ${data.videos.length} 个视频:</div>`;
+    data.videos.forEach(v => {
+      html += `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);cursor:pointer">
+        <input type="checkbox" class="import-check" data-path="${esc(v.path)}" checked>
+        <span style="font-size:13px;flex:1">${esc(v.filename)}</span>
+        <span style="font-size:11px;color:var(--text2)">${v.duration?.toFixed(1)}s · ${v.size_mb}MB</span>
+      </label>`;
+    });
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = `<div style="color:var(--danger);font-size:13px">扫描失败: ${e.message}</div>`;
+  }
+}
+
+async function scanDirectory() {
+  const dirPath = document.getElementById('scanDirInput').value.trim();
+  if (!dirPath) { showToast('⚠️ 请输入目录路径'); return; }
+
+  const container = document.getElementById('dirVideos');
+  container.innerHTML = '<span class="spinner"></span> 扫描中...';
+  try {
+    const res = await fetch(`${API}/api/scan-directory`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({path: dirPath})
+    });
+    const data = await res.json();
+    if (data.error) { container.innerHTML = `<div style="color:var(--danger);font-size:13px">${esc(data.error.message || data.error)}</div>`; return; }
+    if (!data.videos || data.videos.length === 0) {
+      container.innerHTML = '<div style="color:var(--text2);font-size:13px">该目录无视频文件</div>';
+      return;
+    }
+    let html = `<div style="font-size:12px;color:var(--text2);margin-bottom:6px">找到 ${data.videos.length} 个视频:</div>`;
+    data.videos.forEach(v => {
+      html += `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);cursor:pointer">
+        <input type="checkbox" class="import-check" data-path="${esc(v.path)}" checked>
+        <span style="font-size:13px;flex:1">${esc(v.filename)}</span>
+        <span style="font-size:11px;color:var(--text2)">${v.duration?.toFixed(1)}s · ${v.size_mb}MB</span>
+      </label>`;
+    });
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = `<div style="color:var(--danger);font-size:13px">扫描失败: ${e.message}</div>`;
+  }
+}
+
+async function importSelected() {
+  const checks = document.querySelectorAll('.import-check:checked');
+  const files = Array.from(checks).map(c => c.dataset.path).filter(Boolean);
+  if (files.length === 0) { showToast('⚠️ 未选择任何文件'); return; }
+
+  const status = document.getElementById('importStatus');
+  status.textContent = '导入中...';
+  try {
+    const res = await fetch(`${API}/api/projects/${currentProject}/import-files`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({files})
+    });
+    const data = await res.json();
+    if (data.error) { status.textContent = '❌ ' + (data.error.message || data.error); return; }
+    status.textContent = `✅ 已导入 ${data.count} 个视频`;
+    showToast(`✅ 已导入 ${data.count} 个视频`);
+    // 刷新项目
+    setTimeout(() => { closeImportModal(); openProject(currentProject); }, 1000);
+  } catch(e) { status.textContent = '❌ ' + e.message; }
+}
+
+async function importManual() {
+  const text = document.getElementById('manualPaths').value.trim();
+  if (!text) { showToast('⚠️ 请输入文件路径'); return; }
+  const files = text.split('\n').map(s => s.trim()).filter(Boolean);
+
+  const status = document.getElementById('importStatus');
+  status.textContent = '导入中...';
+  try {
+    const res = await fetch(`${API}/api/projects/${currentProject}/import-files`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({files})
+    });
+    const data = await res.json();
+    if (data.error) { status.textContent = '❌ ' + (data.error.message || data.error); return; }
+    status.textContent = `✅ 已导入 ${data.count} 个视频`;
+    showToast(`✅ 已导入 ${data.count} 个视频`);
+    setTimeout(() => { closeImportModal(); openProject(currentProject); }, 1000);
+  } catch(e) { status.textContent = '❌ ' + e.message; }
+}
 
 // Init
 loadProjects();
