@@ -160,6 +160,81 @@ def update_progress(project_id: str, stage: str, percent: int, message: str, det
             "detail": detail,
             "timestamp": time.time(),
         }
+        # 落盘 job 状态
+        try:
+            date_dir = os.path.join(ROOT_DIR, project_id)
+            if os.path.isdir(date_dir):
+                job_path = os.path.join(date_dir, "job_status.json")
+                atomic_write_json(job_path, progress_store[project_id])
+        except Exception:
+            pass
+
+
+# ─── 项目级并发锁 ───
+project_locks: dict[str, threading.Lock] = {}
+project_locks_lock = threading.Lock()
+
+
+def acquire_project_lock(project_id: str) -> bool:
+    """尝试获取项目级锁，返回是否成功。失败说明项目正在处理中。"""
+    with project_locks_lock:
+        lock = project_locks.setdefault(project_id, threading.Lock())
+    return lock.acquire(blocking=False)
+
+
+def release_project_lock(project_id: str):
+    """释放项目级锁"""
+    with project_locks_lock:
+        lock = project_locks.get(project_id)
+    if lock:
+        try:
+            lock.release()
+        except RuntimeError:
+            pass
+
+
+# ─── 路径安全 ───
+
+def resolve_project_dir(project_id: str) -> str:
+    """解析 project_id 到安全的项目目录路径，防止路径穿越。
+    成功返回绝对路径，失败抛出 ValueError。"""
+    root = os.path.realpath(ROOT_DIR)
+    # 规范化 project_id，防止 ../ 穿越
+    safe_id = os.path.normpath(project_id)
+    if safe_id.startswith("..") or safe_id.startswith("/"):
+        raise ValueError(f"非法 project_id: {project_id}")
+    project_dir = os.path.realpath(os.path.join(root, safe_id))
+    if not project_dir.startswith(root + os.sep) and project_dir != root:
+        raise ValueError(f"路径越界: {project_id}")
+    return project_dir
+
+
+def resolve_file_path(project_id: str, sub_dir: str, filename: str) -> str:
+    """解析文件路径，确保在项目目录的安全子目录下。
+    成功返回绝对路径，失败抛出 ValueError。"""
+    project_dir = resolve_project_dir(project_id)
+    # filename 不能包含路径分隔符
+    if os.sep in filename or "/" in filename or ".." in filename:
+        raise ValueError(f"非法文件名: {filename}")
+    file_path = os.path.realpath(os.path.join(project_dir, sub_dir, filename))
+    allowed_dir = os.path.realpath(os.path.join(project_dir, sub_dir))
+    if not file_path.startswith(allowed_dir + os.sep):
+        raise ValueError(f"文件路径越界: {project_id}/{sub_dir}/{filename}")
+    return file_path
+
+
+# ─── 统一错误响应 ───
+
+def error_response(code: str, message: str, stage: str = "", retryable: bool = False, status: int = 500):
+    """统一错误响应格式"""
+    return jsonify({
+        "error": {
+            "code": code,
+            "message": message,
+            "stage": stage,
+            "retryable": retryable,
+        }
+    }), status
 
 
 # ═══════════════════════════════════════════════════════════
@@ -377,6 +452,13 @@ def get_project_data(project_id: str) -> dict:
     shots_data = load_json("shots.json")
     analysis_data = load_json("analysis.json")
 
+    # 检查项目是否正在处理中
+    is_running = False
+    with project_locks_lock:
+        lock = project_locks.get(project_id)
+        if lock and lock.locked():
+            is_running = True
+
     return {
         "id": project_id,
         "date": date_str,
@@ -391,6 +473,8 @@ def get_project_data(project_id: str) -> dict:
         "story_script": load_json("story_script.json"),
         "edit_plan": load_json("edit_plan.json"),
         "publish_pack": load_json("publish_pack.json"),
+        "job_status": load_json("job_status.json"),
+        "is_running": is_running,
         "outputs": outputs,
     }
 
@@ -1548,8 +1632,72 @@ def stage_render(project_id: str, burn_subtitles: bool = True, audio_mode: str =
     if not temp_clips:
         return {"error": "没有成功渲染的片段"}
 
-    # 合并片段
-    update_progress(project_id, "render", 85, "合并片段...")
+    # 合并片段 — 先 ffprobe 校验所有临时片段一致性
+    update_progress(project_id, "render", 85, "校验片段一致性...")
+
+    # 收集每个片段的流信息
+    clip_streams = []
+    for cp in temp_clips:
+        try:
+            r = run_cmd([
+                "ffprobe", "-v", "error", "-show_streams", "-of", "json", cp
+            ], check=False, timeout=10)
+            if r.returncode == 0:
+                info = json.loads(r.stdout)
+                vs = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), {})
+                aus = next((s for s in info.get("streams", []) if s.get("codec_type") == "audio"), {})
+                clip_streams.append({
+                    "path": cp,
+                    "width": vs.get("width"),
+                    "height": vs.get("height"),
+                    "r_frame_rate": vs.get("r_frame_rate"),
+                    "codec_name": vs.get("codec_name"),
+                    "pix_fmt": vs.get("pix_fmt"),
+                    "sample_rate": aus.get("sample_rate"),
+                    "channel_layout": aus.get("channel_layout"),
+                })
+            else:
+                clip_streams.append({"path": cp, "error": "ffprobe 失败"})
+        except Exception as e:
+            clip_streams.append({"path": cp, "error": str(e)})
+
+    # 检查一致性
+    if clip_streams and all("error" not in s for s in clip_streams):
+        ref = clip_streams[0]
+        inconsistent = []
+        for cs in clip_streams[1:]:
+            mismatches = []
+            for key in ["width", "height", "r_frame_rate", "codec_name", "pix_fmt", "sample_rate"]:
+                if cs.get(key) != ref.get(key):
+                    mismatches.append(f"{key}: {cs.get(key)} vs {ref.get(key)}")
+            if mismatches:
+                inconsistent.append({"path": cs["path"], "mismatches": mismatches})
+
+        if inconsistent:
+            print(f"  ⚠ 发现 {len(inconsistent)} 个片段格式不一致，将重新转码")
+            for inc in inconsistent:
+                print(f"    {os.path.basename(inc['path'])}: {', '.join(inc['mismatches'])}")
+            # 重新转码不一致的片段
+            for inc in inconsistent:
+                reencode_path = inc["path"].replace(".mp4", "_re.mp4")
+                vf_re = (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+                         f"crop={w}:{h},setsar=1,fps={fps},format=yuv420p")
+                run_cmd([
+                    "ffmpeg", "-y", "-i", inc["path"],
+                    "-vf", vf_re, "-r", str(fps),
+                    "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+                    "-c:a", "aac", "-ar", str(sr), "-ac", "2",
+                    "-movflags", "+faststart",
+                    reencode_path,
+                ], check=False, timeout=300)
+                if os.path.exists(reencode_path) and os.path.getsize(reencode_path) > 1000:
+                    # 替换原片段
+                    idx = temp_clips.index(inc["path"])
+                    temp_clips[idx] = reencode_path
+                    print(f"    ✓ 已重新转码: {os.path.basename(reencode_path)}")
+
+    # 写入 concat 列表并合并
+    update_progress(project_id, "render", 88, "合并片段...")
     concat_file = os.path.join(out_dir, "_concat.txt")
     with open(concat_file, "w") as f:
         for clip_path in temp_clips:
@@ -2331,6 +2479,12 @@ def api_create_project():
 
 @app.route("/api/projects/<path:project_id>", methods=["GET"])
 def api_project_detail(project_id):
+    try:
+        project_dir = resolve_project_dir(project_id)
+    except ValueError as e:
+        return error_response("INVALID_PROJECT_ID", str(e), status=400)
+    if not os.path.isdir(project_dir):
+        return error_response("PROJECT_NOT_FOUND", f"项目不存在: {project_id}", status=404)
     return jsonify(get_project_data(project_id))
 
 
@@ -2478,16 +2632,26 @@ def api_weekly_report():
 
 @app.route("/api/projects/<path:project_id>/render", methods=["POST"])
 def api_render(project_id):
+    # 渲染也需要项目锁，防止并发渲染
+    if not acquire_project_lock(project_id):
+        return error_response(
+            "RENDER_RUNNING", f"项目 {project_id} 正在渲染中",
+            stage="render", status=409
+        )
+
     burn = request.json.get("burn_subtitles", True) if request.json else True
     audio_mode = request.json.get("audio_mode", "source") if request.json else "source"
     mode = request.json.get("mode", "publish") if request.json else "publish"
     show_debug = request.json.get("show_debug_overlay", False) if request.json else False
+
     def run():
         try:
             return stage_render(project_id, burn_subtitles=burn, audio_mode=audio_mode,
                                mode=mode, show_debug_overlay=show_debug)
         except Exception as e:
             return {"error": str(e)}
+        finally:
+            release_project_lock(project_id)
     return jsonify(run())
 
 
@@ -2588,13 +2752,16 @@ def _sync_script_to_plan(project_id: str, script: dict) -> dict:
 @app.route("/api/projects/<path:project_id>/story-script", methods=["PUT"])
 def api_save_story_script(project_id):
     """保存编辑后的故事脚本，自动同步到剪辑计划"""
-    date_dir = os.path.join(ROOT_DIR, project_id)
+    try:
+        date_dir = resolve_project_dir(project_id)
+    except ValueError as e:
+        return error_response("INVALID_PROJECT_ID", str(e), status=400)
     if not os.path.isdir(date_dir):
-        return jsonify({"error": "项目不存在"}), 404
+        return error_response("PROJECT_NOT_FOUND", f"项目不存在: {project_id}", status=404)
 
     script = request.json
     if not script:
-        return jsonify({"error": "请求体为空"}), 400
+        return error_response("EMPTY_BODY", "请求体为空", status=400)
 
     # 保存故事脚本
     script_path = os.path.join(date_dir, "story_script.json")
@@ -2616,13 +2783,16 @@ def api_save_story_script(project_id):
 @app.route("/api/projects/<path:project_id>/edit-plan", methods=["PUT"])
 def api_save_edit_plan(project_id):
     """保存编辑后的剪辑计划"""
-    date_dir = os.path.join(ROOT_DIR, project_id)
+    try:
+        date_dir = resolve_project_dir(project_id)
+    except ValueError as e:
+        return error_response("INVALID_PROJECT_ID", str(e), status=400)
     if not os.path.isdir(date_dir):
-        return jsonify({"error": "项目不存在"}), 404
+        return error_response("PROJECT_NOT_FOUND", f"项目不存在: {project_id}", status=404)
 
     plan = request.json
     if not plan:
-        return jsonify({"error": "请求体为空"}), 400
+        return error_response("EMPTY_BODY", "请求体为空", status=400)
 
     # 确保有必要的字段
     plan.setdefault("version", "user-edited-v1")
@@ -2657,14 +2827,24 @@ def api_save_edit_plan(project_id):
 
 @app.route("/api/projects/<path:project_id>/full-pipeline", methods=["POST"])
 def api_full_pipeline(project_id):
+    # 项目级并发锁
+    if not acquire_project_lock(project_id):
+        return error_response(
+            "PIPELINE_RUNNING", f"项目 {project_id} 正在处理中",
+            stage="pipeline", status=409
+        )
+
     theme = request.json.get("theme", "日常生活记录") if request.json else "日常生活记录"
     duration = request.json.get("duration", 60) if request.json else 60
-    # 在后台线程中运行，通过 SSE 报告进度
+
     def run_bg():
         try:
             run_full_pipeline(project_id, theme, target_duration=duration)
         except Exception as e:
             update_progress(project_id, "error", -1, f"全流程失败: {e}")
+        finally:
+            release_project_lock(project_id)
+
     thread = threading.Thread(target=run_bg, daemon=True)
     thread.start()
     return jsonify({"status": "started", "project_id": project_id, "theme": theme})
@@ -2674,42 +2854,63 @@ def api_full_pipeline(project_id):
 
 @app.route("/api/file/<path:filepath>")
 def api_serve_file(filepath):
-    """安全地提供文件"""
-    abs_path = os.path.abspath(filepath)
-    # 安全检查：只允许在 ROOT_DIR 下
-    if not abs_path.startswith(os.path.abspath(ROOT_DIR)):
-        return jsonify({"error": "Access denied"}), 403
-    directory = os.path.dirname(abs_path)
-    filename = os.path.basename(abs_path)
-    return send_from_directory(directory, filename)
+    """安全地提供文件 — 使用集中路径校验"""
+    try:
+        abs_path = os.path.realpath(os.path.abspath(filepath))
+        root = os.path.realpath(ROOT_DIR)
+        if not abs_path.startswith(root + os.sep):
+            return error_response("ACCESS_DENIED", "路径越界", status=403)
+        return send_from_directory(os.path.dirname(abs_path), os.path.basename(abs_path))
+    except Exception as e:
+        return error_response("FILE_ERROR", str(e), status=404)
 
 
 @app.route("/api/video/<path:project_id>/<filename>")
 def api_video(project_id, filename):
-    """提供视频文件"""
-    raw_dir = os.path.join(ROOT_DIR, project_id, "raw")
-    return send_from_directory(raw_dir, filename)
+    """提供视频文件 — 集中路径校验"""
+    try:
+        file_path = resolve_file_path(project_id, "raw", filename)
+        return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path))
+    except ValueError as e:
+        return error_response("PATH_VIOLATION", str(e), status=403)
+    except Exception as e:
+        return error_response("FILE_NOT_FOUND", str(e), status=404)
 
 
 @app.route("/api/keyframe/<path:project_id>/<sub>/<filename>")
 def api_keyframe(project_id, sub, filename):
-    """提供关键帧图片"""
-    kf_dir = os.path.join(ROOT_DIR, project_id, "keyframes", sub)
-    return send_from_directory(kf_dir, filename)
+    """提供关键帧图片 — 集中路径校验"""
+    try:
+        file_path = resolve_file_path(project_id, f"keyframes/{sub}", filename)
+        return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path))
+    except ValueError as e:
+        return error_response("PATH_VIOLATION", str(e), status=403)
+    except Exception as e:
+        return error_response("FILE_NOT_FOUND", str(e), status=404)
 
 
 @app.route("/api/contact-sheet/<path:project_id>/<filename>")
 def api_contact_sheet(project_id, filename):
-    """提供 contact sheet"""
-    cs_dir = os.path.join(ROOT_DIR, project_id, "contact_sheets")
-    return send_from_directory(cs_dir, filename)
+    """提供 contact sheet — 集中路径校验"""
+    try:
+        file_path = resolve_file_path(project_id, "contact_sheets", filename)
+        return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path))
+    except ValueError as e:
+        return error_response("PATH_VIOLATION", str(e), status=403)
+    except Exception as e:
+        return error_response("FILE_NOT_FOUND", str(e), status=404)
 
 
 @app.route("/api/output/<path:project_id>/<filename>")
 def api_output(project_id, filename):
-    """提供输出文件"""
-    out_dir = os.path.join(ROOT_DIR, project_id, "outputs")
-    return send_from_directory(out_dir, filename)
+    """提供输出文件 — 集中路径校验"""
+    try:
+        file_path = resolve_file_path(project_id, "outputs", filename)
+        return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path))
+    except ValueError as e:
+        return error_response("PATH_VIOLATION", str(e), status=403)
+    except Exception as e:
+        return error_response("FILE_NOT_FOUND", str(e), status=404)
 
 
 # ═══════════════════════════════════════════════════════════
