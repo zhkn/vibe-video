@@ -257,13 +257,14 @@ a { color: var(--accent); text-decoration: none; }
             <option value="180">3分钟</option>
           </select>
         </div>
-        <button class="btn primary" id="btnFullPipeline" onclick="runFullPipeline()">🚀 一键全流程</button>
+        <button class="btn primary" id="btnFullPipeline" onclick="runFullPipeline()">🎯 生成剪辑方案</button>
         <button class="btn" onclick="runStage('keyframes')">🎞️ 抽帧</button>
-        <button class="btn" onclick="runStage('visual-analysis')">👁️ 视觉分析</button>
-        <button class="btn" onclick="runStage('transcription')">🎙️ 转字幕</button>
-        <button class="btn" onclick="runStage('story-script')">📝 剧本</button>
-        <button class="btn" onclick="runStage('edit-plan')">📋 剪辑计划</button>
-        <button class="btn" onclick="runRender('draft')">📝 草稿渲染</button>
+        <button class="btn" onclick="runStage('visual-analysis')">👁️ 分析</button>
+        <button class="btn" onclick="runStage('hook-candidates')">🪝 Hook评分</button>
+        <button class="btn" onclick="runStage('story-script')">📝 生成方案</button>
+        <button class="btn" onclick="runStage('edit-plan')">📋 决策书</button>
+        <button class="btn" onclick="runStage('retention-check')">⚡ 节奏检查</button>
+        <button class="btn" onclick="runRender('draft')">📝 草稿</button>
         <button class="btn green" onclick="runRender('publish')">🎬 发布渲染</button>
         <button class="btn" onclick="runStage('publish-pack')">📦 发布包</button>
       </div>
@@ -272,27 +273,29 @@ a { color: var(--accent); text-decoration: none; }
     </div>
 
     <div class="tabs" id="tabs">
-      <div class="tab active" data-tab="videos">📹 素材视频</div>
-      <div class="tab" data-tab="keyframes">🎞️ 关键帧</div>
-      <div class="tab" data-tab="contact-sheets">🖼️ Contact Sheet</div>
+      <div class="tab active" data-tab="videos">📹 素材</div>
       <div class="tab" data-tab="analysis">👁️ 片段分析</div>
-      <div class="tab" data-tab="transcription">🎙️ 字幕转写</div>
-      <div class="tab" data-tab="script">📝 剧情脚本</div>
-      <div class="tab" data-tab="edit-plan">📋 剪辑计划</div>
+      <div class="tab" data-tab="hooks">🪝 Hook</div>
+      <div class="tab" data-tab="script">📝 候选方案</div>
+      <div class="tab" data-tab="edit-plan">📋 决策书</div>
+      <div class="tab" data-tab="retention">⚡ 节奏</div>
       <div class="tab" data-tab="publish-pack">📦 发布包</div>
       <div class="tab" data-tab="output">🎬 输出</div>
+      <div class="tab" data-tab="keyframes">🎞️ 帧</div>
+      <div class="tab" data-tab="transcription">🎙️ 字幕</div>
     </div>
 
     <div id="tabContent">
       <div class="tab-content active" id="tc-videos"></div>
-      <div class="tab-content" id="tc-keyframes"></div>
-      <div class="tab-content" id="tc-contact-sheets"></div>
       <div class="tab-content" id="tc-analysis"></div>
-      <div class="tab-content" id="tc-transcription"></div>
+      <div class="tab-content" id="tc-hooks"></div>
       <div class="tab-content" id="tc-script"></div>
       <div class="tab-content" id="tc-edit-plan"></div>
+      <div class="tab-content" id="tc-retention"></div>
       <div class="tab-content" id="tc-publish-pack"></div>
       <div class="tab-content" id="tc-output"></div>
+      <div class="tab-content" id="tc-keyframes"></div>
+      <div class="tab-content" id="tc-transcription"></div>
     </div>
   </div>
 </div>
@@ -428,6 +431,32 @@ function renderProject(data) {
   }
   ta.innerHTML = analysisHtml;
 
+  // Hook Candidates
+  const th = document.getElementById('tc-hooks');
+  if (data.hook_candidates && data.hook_candidates.candidates && data.hook_candidates.candidates.length > 0) {
+    th.innerHTML = renderHookCandidates(data.hook_candidates);
+  } else {
+    th.innerHTML = '<div class="empty"><div class="icon">🪝</div><div class="msg">尚未进行 Hook 评分</div></div>';
+  }
+
+  // Story Plans (3 个候选方案)
+  const ts2 = document.getElementById('tc-script');
+  if (data.story_plans && data.story_plans.plans && data.story_plans.plans.length > 0) {
+    ts2.innerHTML = renderStoryPlans(data.story_plans);
+  } else if (data.story_script) {
+    ts2.innerHTML = renderScript(data.story_script);
+  } else {
+    ts2.innerHTML = '<div class="empty"><div class="icon">📝</div><div class="msg">尚未生成候选方案</div></div>';
+  }
+
+  // Retention Audit
+  const tr = document.getElementById('tc-retention');
+  if (data.retention_audit) {
+    tr.innerHTML = renderRetentionAudit(data.retention_audit);
+  } else {
+    tr.innerHTML = '<div class="empty"><div class="icon">⚡</div><div class="msg">尚未进行节奏检查</div></div>';
+  }
+
   // Transcription
   const tt = document.getElementById('tc-transcription');
   if (data.transcription && data.transcription.length > 0) {
@@ -446,14 +475,6 @@ function renderProject(data) {
     tt.innerHTML = html;
   } else {
     tt.innerHTML = '<div class="empty"><div class="icon">🎙️</div><div class="msg">尚未转写字幕</div></div>';
-  }
-
-  // Script
-  const ts = document.getElementById('tc-script');
-  if (data.story_script) {
-    ts.innerHTML = renderScript(data.story_script);
-  } else {
-    ts.innerHTML = '<div class="empty"><div class="icon">📝</div><div class="msg">尚未生成剧情脚本</div></div>';
   }
 
   // Edit plan
@@ -516,6 +537,130 @@ function renderProject(data) {
   } else {
     to.innerHTML = '<div class="empty"><div class="icon">🎬</div><div class="msg">尚未渲染输出</div></div>';
   }
+}
+
+// ─── Hook Candidates ───
+function renderHookCandidates(data) {
+  const candidates = data.candidates || [];
+  if (candidates.length === 0) return '<div class="empty"><div class="icon">🪝</div><div class="msg">无 Hook 候选</div></div>';
+
+  let html = `<div style="margin-bottom:12px;font-size:13px;color:var(--text2)">
+    🪝 Hook 评分 — 找出最适合做开头的片段 (${candidates.length} 个候选)
+  </div>`;
+
+  candidates.forEach(c => {
+    const scoreColor = c.score >= 80 ? 'var(--green)' : c.score >= 60 ? 'var(--warn)' : 'var(--text2)';
+    html += `<div class="script-card" style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span style="font-size:12px;color:var(--accent)">#${c.rank}</span>
+          <span style="font-size:14px;font-weight:600;margin-left:8px">${esc(c.source || '?')}</span>
+          <span style="font-size:12px;color:var(--accent2);margin-left:8px">${(c.start||0).toFixed(1)}s → ${(c.end||0).toFixed(1)}s</span>
+        </div>
+        <span style="font-size:18px;font-weight:700;color:${scoreColor}">${c.score}分</span>
+      </div>
+      <div style="margin-top:6px;font-size:13px">
+        <span style="background:var(--bg3);padding:2px 8px;border-radius:4px;margin-right:8px">${esc(c.hook_type || '?')}</span>
+        ${c.works_muted ? '<span style="color:var(--green);margin-right:8px">🔇 静音可懂</span>' : '<span style="color:var(--warn);margin-right:8px">🔊 需要声音</span>'}
+        ${c.visual_question ? `<span style="color:var(--accent3)">❓ ${esc(c.visual_question)}</span>` : ''}
+      </div>
+      ${c.caption ? `<div style="margin-top:4px;font-size:12px;color:var(--text2)">💬 ${esc(c.caption)}</div>` : ''}
+    </div>`;
+  });
+  return html;
+}
+
+// ─── Story Plans (3 个候选方案) ───
+function renderStoryPlans(data) {
+  const plans = data.plans || [];
+  if (plans.length === 0) return '<div class="empty"><div class="icon">📝</div><div class="msg">无候选方案</div></div>';
+
+  // 按推荐指数排序
+  const sorted = [...plans].sort((a, b) => (b.recommendation_score || 0) - (a.recommendation_score || 0));
+
+  let html = `<div style="margin-bottom:12px;font-size:13px;color:var(--text2)">
+    📝 ${plans.length} 个候选方案 — 选择最适合的角度
+    ${data.selected_plan ? `<span style="margin-left:12px;color:var(--green)">✅ 已选: ${esc(data.selected_plan)}</span>` : ''}
+  </div>`;
+
+  sorted.forEach((p, idx) => {
+    const isTop = idx === 0;
+    const scoreColor = (p.recommendation_score || 0) >= 80 ? 'var(--green)' : (p.recommendation_score || 0) >= 60 ? 'var(--warn)' : 'var(--text2)';
+    html += `<div class="script-card" style="margin-bottom:12px;${isTop ? 'border-left:3px solid var(--green)' : ''}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <span style="font-size:16px;font-weight:700;color:var(--accent)">${esc(p.plan_id || '?')}</span>
+          <span style="font-size:14px;margin-left:8px">${esc(p.angle || '?')}</span>
+          ${isTop ? '<span style="background:var(--green);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px">推荐</span>' : ''}
+        </div>
+        <span style="font-size:20px;font-weight:700;color:${scoreColor}">${p.recommendation_score || 0}</span>
+      </div>
+      <div style="margin-top:8px;font-size:13px;color:var(--text2)">${esc(p.reason || '')}</div>
+      ${p.risk ? `<div style="margin-top:4px;font-size:12px;color:var(--warn)">⚠️ ${esc(p.risk)}</div>` : ''}
+      <div style="margin-top:8px;display:flex;gap:16px;font-size:12px;color:var(--text2);flex-wrap:wrap">
+        <span>🎯 标题: <strong style="color:var(--text)">${esc(p.title || '?')}</strong></span>
+        <span>🖼️ 封面: <strong style="color:var(--text)">${esc(p.cover_text || '?')}</strong></span>
+        <span>🎵 ${esc(p.tone || '?')}</span>
+        <span>⏱️ ${p.target_duration || 60}s</span>
+      </div>
+      ${p.hook_clip ? `<div style="margin-top:6px;font-size:12px;color:var(--accent2)">🪝 开头: ${esc(p.hook_clip)}</div>` : ''}
+      ${p.clips && p.clips.length > 0 ? `
+        <div style="margin-top:8px;font-size:12px;color:var(--text2)">
+          时间线: ${p.clips.map(c => `${esc(c.role||'?')} ${c.start?.toFixed(1)}-${c.end?.toFixed(1)}s`).join(' → ')}
+        </div>` : ''}
+      <div style="margin-top:8px">
+        <button class="btn" style="font-size:11px;padding:4px 10px" onclick="selectPlan('${esc(p.plan_id || '')}')">✅ 选择此方案</button>
+      </div>
+    </div>`;
+  });
+  return html;
+}
+
+function selectPlan(planId) {
+  showToast(`✅ 已选择方案 ${planId}，请前往「决策书」和「发布包」确认`);
+}
+
+// ─── Retention Audit ───
+function renderRetentionAudit(audit) {
+  const passed = audit.pass;
+  let html = `<div class="script-card">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <span style="font-size:20px">${passed ? '✅' : '⚠️'}</span>
+      <span style="font-size:16px;font-weight:600;color:${passed ? 'var(--green)' : 'var(--warn)'}">
+        节奏检查: ${passed ? '通过' : `${audit.issues?.length || 0} 个问题`}
+      </span>
+    </div>`;
+
+  if (audit.issues && audit.issues.length > 0) {
+    html += '<div style="margin-bottom:12px">';
+    audit.issues.forEach(issue => {
+      html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;color:var(--text)">
+        ❌ ${esc(issue)}
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  if (audit.suggestions && audit.suggestions.length > 0) {
+    html += '<div style="margin-bottom:12px">';
+    audit.suggestions.forEach(s => {
+      html += `<div style="padding:4px 0;font-size:12px;color:var(--accent2)">💡 ${esc(s)}</div>`;
+    });
+    html += '</div>';
+  }
+
+  // 检查项
+  html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px;font-size:12px">
+    <div>${audit.hooks_in_first_3s ? '✅' : '❌'} 前3秒有钩子</div>
+    <div>${audit.theme_in_first_10s ? '✅' : '❌'} 前10秒交代主题</div>
+    <div>${audit.has_before_after ? '✅' : '❌'} 有前后对比</div>
+    <div>${audit.has_memory_point ? '✅' : '❌'} 有记忆点</div>
+    <div>${audit.has_ending_interaction ? '✅' : '❌'} 结尾有互动</div>
+    <div>${(audit.max_same_type_duration || 0) <= 8 ? '✅' : '❌'} 同类画面≤8秒 (${(audit.max_same_type_duration||0).toFixed(0)}s)</div>
+  </div>`;
+
+  html += '</div>';
+  return html;
 }
 
 function renderScript(script) {
@@ -698,9 +843,21 @@ function renderPublishPack(pack) {
       <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;font-size:14px;color:var(--accent3)">${esc(pack.comment_prompt)}</div></div>`;
   }
 
-  // 平台备注
-  if (pack.platform_notes) {
-    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px">📱 平台发布备注</div>`;
+  // 平台变体 (可直接复制发布)
+  if (pack.platform_variants) {
+    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px">📱 平台变体 (可直接复制)</div>`;
+    const platformNames = {douyin: '🎵 抖音', xiaohongshu: '📕 小红书', shipinhao: '📺 视频号'};
+    for (const [key, variant] of Object.entries(pack.platform_variants)) {
+      html += `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:6px">${platformNames[key] || key}</div>
+        ${variant.title ? `<div style="font-size:14px;margin-bottom:4px">📝 <strong>${esc(variant.title)}</strong> <span style="font-size:11px;color:var(--text2);cursor:pointer" onclick="navigator.clipboard.writeText('${esc(variant.title)}');showToast('已复制')">📋</span></div>` : ''}
+        ${variant.cover_text ? `<div style="font-size:13px;color:var(--text2)">🖼️ ${esc(variant.cover_text)} <span style="font-size:11px;cursor:pointer" onclick="navigator.clipboard.writeText('${esc(variant.cover_text)}');showToast('已复制')">📋</span></div>` : ''}
+        ${variant.description ? `<div style="font-size:12px;color:var(--text2);margin-top:4px">📄 ${esc(variant.description)}</div>` : ''}
+      </div>`;
+    }
+    html += '</div>';
+  } else if (pack.platform_notes) {
+    html += `<div style="margin-bottom:16px"><div style="font-size:13px;color:var(--text2);margin-bottom:8px">📱 平台备注</div>`;
     const platformNames = {douyin: '🎵 抖音', xiaohongshu: '📕 小红书', shipinhao: '📺 视频号'};
     for (const [key, note] of Object.entries(pack.platform_notes)) {
       html += `<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">

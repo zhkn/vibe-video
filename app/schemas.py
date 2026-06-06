@@ -205,3 +205,88 @@ def validate_shots(raw_shots: list[dict]) -> list[dict]:
                 print(f"  Shot 校验失败，跳过: {e}")
                 continue
     return validated
+
+
+# ─── Hook 候选 ───
+
+class HookCandidate(BaseModel):
+    """hook_candidates.json 中的每个候选"""
+    rank: int = Field(0, description="排名")
+    shot_id: str = Field("", description="shot ID")
+    source: str = Field("", description="源视频文件名")
+    start: float = Field(0.0, description="起始秒")
+    end: float = Field(0.0, description="结束秒")
+    hook_type: str = Field("", description="hook 类型: 整理后成果/动作引入/前后对比/细节特写/问题画面")
+    works_muted: bool = Field(True, description="静音状态下是否看得懂")
+    visual_question: str = Field("", description="画面制造的问题")
+    caption: str = Field("", description="建议字幕")
+    score: int = Field(0, ge=0, le=100, description="hook 综合评分")
+
+
+class HookCandidatesResponse(BaseModel):
+    """hook_candidates.json 顶层结构"""
+    candidates: list[HookCandidate] = Field(default_factory=list)
+
+
+# ─── 候选方案 (3 个角度) ───
+
+class StoryPlanClip(BaseModel):
+    """方案中的每个片段"""
+    shot_id: str = Field("", description="shot ID")
+    role: str = Field("action", description="故事角色")
+    source: str = Field("", description="源视频文件名")
+    start: float = Field(0.0, description="起始秒")
+    end: float = Field(0.0, description="结束秒")
+    duration: float = Field(0.0, description="时长")
+    caption: str = Field("", description="字幕")
+    viewer_question: str = Field("", description="这个片段制造/回答的观众问题")
+    voiceover_text: str = Field("", description="旁白文字")
+
+
+class StoryPlan(BaseModel):
+    """单个候选方案"""
+    plan_id: str = Field("", description="方案 ID: plan_A / plan_B / plan_C")
+    angle: str = Field("", description="方案角度: 整理前后对比 / 花园日记 / 治愈氛围")
+    hook_clip: str = Field("", description="推荐开头片段描述")
+    reason: str = Field("", description="为什么推荐这个角度")
+    title: str = Field("", description="视频标题")
+    cover_text: str = Field("", description="封面文字")
+    tone: str = Field("", description="整体调性")
+    target_duration: int = Field(60, description="目标时长")
+    clips: list[StoryPlanClip] = Field(default_factory=list, description="时间线")
+    risk: str = Field("", description="风险提示")
+    recommendation_score: int = Field(0, ge=0, le=100, description="推荐指数")
+
+
+class StoryPlansResponse(BaseModel):
+    """story_plans.json 顶层结构"""
+    plans: list[StoryPlan] = Field(default_factory=list)
+    selected_plan: str = Field("", description="用户选择的方案 ID")
+
+
+# ─── 废片候选 ───
+
+class DeleteCandidate(BaseModel):
+    """废片信息"""
+    shot_id: str = Field("", description="shot ID")
+    source: str = Field("", description="源视频文件名")
+    start: float = Field(0.0, description="起始秒")
+    end: float = Field(0.0, description="结束秒")
+    reason: str = Field("", description="删除原因")
+    can_use_as: str = Field("", description="可降级用法: 如'最多保留2秒作节奏过渡'")
+
+
+# ─── 节奏检查 ───
+
+class RetentionAudit(BaseModel):
+    """retention_audit.json 结构"""
+    plan_id: str = Field("", description="检查的方案 ID")
+    pass_check: bool = Field(False, description="是否通过", alias="pass")
+    issues: list[str] = Field(default_factory=list, description="发现的问题")
+    suggestions: list[str] = Field(default_factory=list, description="改进建议")
+    hooks_in_first_3s: bool = Field(False, description="前3秒是否有钩子")
+    theme_in_first_10s: bool = Field(False, description="前10秒是否交代主题")
+    has_before_after: bool = Field(False, description="是否有前后对比")
+    has_memory_point: bool = Field(False, description="是否有记忆点")
+    has_ending_interaction: bool = Field(False, description="结尾是否有互动")
+    max_same_type_duration: float = Field(0.0, description="最长连续同类画面时长(秒)")
