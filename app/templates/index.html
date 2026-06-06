@@ -464,13 +464,37 @@ function renderProject(data) {
     tep.innerHTML = '<div class="empty"><div class="icon">📋</div><div class="msg">尚未生成剪辑计划</div></div>';
   }
 
-  // Publish Pack
+  // Publish Pack + Performance
   const tp = document.getElementById('tc-publish-pack');
+  let packHtml = '';
   if (data.publish_pack) {
-    tp.innerHTML = renderPublishPack(data.publish_pack);
-  } else {
-    tp.innerHTML = '<div class="empty"><div class="icon">📦</div><div class="msg">尚未生成发布包</div></div>';
+    packHtml += renderPublishPack(data.publish_pack);
   }
+  // 性能记录表单
+  packHtml += `<div class="script-card" style="margin-top:16px">
+    <div class="title">📊 发布数据记录</div>
+    <div class="subtitle">发布后回填数据，用于系统学习优化</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+      <div class="edit-row"><label>平台</label>
+        <select class="edit-field" id="perf-platform" style="width:120px">
+          <option value="douyin">🎵 抖音</option><option value="xiaohongshu">📕 小红书</option><option value="shipinhao">📺 视频号</option>
+        </select></div>
+      <div class="edit-row"><label>标题</label><input class="edit-field" id="perf-title" placeholder="实际发布的标题" style="width:200px"></div>
+      <div class="edit-row"><label>👁️ 播放</label><input class="edit-field sm" id="perf-views" type="number" placeholder="0"></div>
+      <div class="edit-row"><label>❤️ 点赞</label><input class="edit-field sm" id="perf-likes" type="number" placeholder="0"></div>
+      <div class="edit-row"><label>💬 评论</label><input class="edit-field sm" id="perf-comments" type="number" placeholder="0"></div>
+      <div class="edit-row"><label>⭐ 收藏</label><input class="edit-field sm" id="perf-saves" type="number" placeholder="0"></div>
+      <div class="edit-row"><label>🔄 转发</label><input class="edit-field sm" id="perf-shares" type="number" placeholder="0"></div>
+      <div class="edit-row"><label>⏱️ 平均观看</label><input class="edit-field sm" id="perf-watch" type="number" placeholder="秒"></div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn primary" onclick="submitPerformance()">📊 记录数据</button>
+      <button class="btn" onclick="loadWeeklyReport()">📈 查看周报</button>
+    </div>
+    <div id="perf-status" style="font-size:12px;color:var(--text2);margin-top:8px"></div>
+    <div id="weekly-report" style="margin-top:12px"></div>
+  </div>`;
+  tp.innerHTML = packHtml || '<div class="empty"><div class="icon">📦</div><div class="msg">尚未生成发布包</div></div>';
 
   // Output
   const to = document.getElementById('tc-output');
@@ -572,6 +596,61 @@ function renderScript(script) {
   </div>`;
 
   return html;
+}
+
+async function submitPerformance() {
+  if (!currentProject) return;
+  const data = {
+    platform: document.getElementById('perf-platform')?.value || 'douyin',
+    title: document.getElementById('perf-title')?.value || '',
+    views: parseInt(document.getElementById('perf-views')?.value) || 0,
+    likes: parseInt(document.getElementById('perf-likes')?.value) || 0,
+    comments: parseInt(document.getElementById('perf-comments')?.value) || 0,
+    saves: parseInt(document.getElementById('perf-saves')?.value) || 0,
+    shares: parseInt(document.getElementById('perf-shares')?.value) || 0,
+    avg_watch_time: parseInt(document.getElementById('perf-watch')?.value) || 0,
+  };
+  const status = document.getElementById('perf-status');
+  status.textContent = '记录中...';
+  try {
+    const res = await fetch(`${API}/api/projects/${currentProject}/performance`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (result.error) { status.textContent = '❌ ' + result.error; return; }
+    status.textContent = `✅ 已记录 (${result.total_records} 条数据)`;
+    showToast('📊 数据已记录');
+  } catch(e) { status.textContent = '❌ ' + e.message; }
+}
+
+async function loadWeeklyReport() {
+  const container = document.getElementById('weekly-report');
+  container.innerHTML = '<span class="spinner"></span> 加载中...';
+  try {
+    const res = await fetch(`${API}/api/performance/report`);
+    const report = await res.json();
+    if (report.error) { container.innerHTML = `<div style="color:var(--text2)">${report.error}</div>`; return; }
+    let html = '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px">';
+    html += `<div style="font-size:14px;font-weight:600;margin-bottom:8px">📈 数据周报 (${report.total_videos} 个视频)</div>`;
+    if (report.ranking) {
+      html += '<div style="font-size:12px;margin-bottom:8px">模板表现排名:</div>';
+      report.ranking.forEach((r, i) => {
+        html += `<div style="display:flex;gap:12px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">
+          <span style="color:var(--accent);min-width:20px">#${i+1}</span>
+          <span style="min-width:100px">${esc(r.template)}</span>
+          <span>👁️ ${r.avg_views}</span>
+          <span>❤️ ${r.avg_likes}</span>
+          <span>💬 ${r.avg_comments}</span>
+          <span>📊 ${Math.round(r.avg_completion*100)}%完播</span>
+        </div>`;
+      });
+    }
+    if (report.insights && report.insights.length > 0) {
+      html += '<div style="margin-top:8px;font-size:12px;color:var(--accent2)">💡 ' + report.insights.join('<br>💡 ') + '</div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  } catch(e) { container.innerHTML = `<div style="color:var(--danger)">${e.message}</div>`; }
 }
 
 function renderPublishPack(pack) {

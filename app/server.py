@@ -2197,6 +2197,163 @@ def stage_publish_pack(project_id: str, theme: str = "日常生活记录") -> di
 
 
 # ═══════════════════════════════════════════════════════════
+# Stage 10: 发布后反馈记录
+# ═══════════════════════════════════════════════════════════
+
+def stage_record_performance(project_id: str, data: dict) -> dict:
+    """记录发布后的平台数据，用于反馈学习"""
+    date_dir = os.path.join(ROOT_DIR, project_id)
+
+    # 读取已有数据
+    perf_path = os.path.join(date_dir, "performance.json")
+    performances = []
+    if os.path.exists(perf_path):
+        with open(perf_path, encoding="utf-8") as f:
+            performances = json.load(f)
+        if not isinstance(performances, list):
+            performances = [performances]
+
+    # 读取模板信息
+    template_data = {}
+    template_path = os.path.join(date_dir, "video_template.json")
+    if os.path.exists(template_path):
+        with open(template_path, encoding="utf-8") as f:
+            template_data = json.load(f)
+
+    # 构建记录
+    perf_record = {
+        "project_id": project_id,
+        "platform": data.get("platform", "douyin"),
+        "published_at": data.get("published_at", datetime.datetime.now().strftime("%Y-%m-%d")),
+        "template": template_data.get("video_template", "unknown"),
+        "template_name": template_data.get("template_name", ""),
+        "title": data.get("title", ""),
+        "duration": data.get("duration", 0),
+        "views": data.get("views", 0),
+        "likes": data.get("likes", 0),
+        "comments": data.get("comments", 0),
+        "saves": data.get("saves", 0),
+        "shares": data.get("shares", 0),
+        "avg_watch_time": data.get("avg_watch_time", 0),
+        "completion_rate": data.get("completion_rate", 0),
+        "recorded_at": datetime.datetime.now().isoformat(),
+    }
+
+    performances.append(perf_record)
+
+    with open(perf_path, "w", encoding="utf-8") as f:
+        json.dump(performances, f, ensure_ascii=False, indent=2)
+
+    return {"status": "recorded", "record": perf_record, "total_records": len(performances)}
+
+
+def stage_weekly_report(project_id: str = None) -> dict:
+    """基于 performance.json 生成周报分析"""
+    # 如果指定了项目，只分析该项目
+    if project_id:
+        date_dir = os.path.join(ROOT_DIR, project_id)
+        perf_path = os.path.join(date_dir, "performance.json")
+        if not os.path.exists(perf_path):
+            return {"error": "无发布数据"}
+        with open(perf_path, encoding="utf-8") as f:
+            performances = json.load(f)
+        if not isinstance(performances, list):
+            performances = [performances]
+    else:
+        # 扫描所有项目的 performance.json
+        performances = []
+        for name in sorted(os.listdir(ROOT_DIR), reverse=True):
+            date_dir = os.path.join(ROOT_DIR, name)
+            if not os.path.isdir(date_dir) or name == "Inbox":
+                continue
+            # 支持两层目录
+            subdirs = [date_dir]
+            if not os.path.isdir(os.path.join(date_dir, "raw")):
+                subdirs = [os.path.join(date_dir, d) for d in os.listdir(date_dir)
+                          if os.path.isdir(os.path.join(date_dir, d))]
+            for sd in subdirs:
+                perf_path = os.path.join(sd, "performance.json")
+                if os.path.exists(perf_path):
+                    with open(perf_path, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        performances.extend(data)
+                    else:
+                        performances.append(data)
+
+    if not performances:
+        return {"error": "无发布数据", "performances": []}
+
+    # 分析
+    by_template = {}
+    by_platform = {}
+    for p in performances:
+        tmpl = p.get("template", "unknown")
+        plat = p.get("platform", "unknown")
+        by_template.setdefault(plat, []).append(p)
+        by_platform.setdefault(plat, []).append(p)
+
+    # 按模板统计
+    template_stats = {}
+    for p in performances:
+        tmpl = p.get("template", "unknown")
+        if tmpl not in template_stats:
+            template_stats[tmpl] = {"count": 0, "total_views": 0, "total_likes": 0, "total_comments": 0,
+                                    "total_saves": 0, "total_shares": 0, "total_completion": 0}
+        s = template_stats[tmpl]
+        s["count"] += 1
+        s["total_views"] += p.get("views", 0)
+        s["total_likes"] += p.get("likes", 0)
+        s["total_comments"] += p.get("comments", 0)
+        s["total_saves"] += p.get("saves", 0)
+        s["total_shares"] += p.get("shares", 0)
+        s["total_completion"] += p.get("completion_rate", 0)
+
+    # 计算平均值
+    for tmpl, s in template_stats.items():
+        n = s["count"]
+        s["avg_views"] = round(s["total_views"] / n)
+        s["avg_likes"] = round(s["total_likes"] / n)
+        s["avg_comments"] = round(s["total_comments"] / n)
+        s["avg_completion"] = round(s["total_completion"] / n, 2)
+
+    # 按观看量排序模板
+    ranked = sorted(template_stats.items(), key=lambda x: x[1]["avg_views"], reverse=True)
+
+    report = {
+        "total_videos": len(performances),
+        "template_stats": template_stats,
+        "ranking": [{"template": t, **s} for t, s in ranked],
+        "insights": [],
+    }
+
+    # 生成洞察
+    if len(ranked) >= 2:
+        best = ranked[0]
+        worst = ranked[-1]
+        report["insights"].append(f"「{best[0]}」类视频平均观看最高 ({best[1]['avg_views']})，优于「{worst[0]}」({worst[1]['avg_views']})")
+
+    # 时长分析
+    durations = [p.get("duration", 0) for p in performances if p.get("duration", 0) > 0]
+    if durations:
+        avg_dur = sum(durations) / len(durations)
+        # 找完播率最高的时长区间
+        high_completion = [p for p in performances if p.get("completion_rate", 0) >= 0.3]
+        if high_completion:
+            hc_durations = [p.get("duration", 0) for p in high_completion if p.get("duration", 0) > 0]
+            if hc_durations:
+                avg_hc_dur = sum(hc_durations) / len(hc_durations)
+                report["insights"].append(f"完播率≥30%的视频平均时长 {avg_hc_dur:.0f}秒")
+
+    # 保存报告
+    report_path = os.path.join(ROOT_DIR, "weekly_report.json")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+
+    return report
+
+
+# ═══════════════════════════════════════════════════════════
 # 全流程
 # ═══════════════════════════════════════════════════════════
 
@@ -2433,6 +2590,23 @@ def api_publish_pack(project_id):
         except Exception as e:
             return {"error": str(e)}
     return jsonify(run())
+
+
+@app.route("/api/projects/<path:project_id>/performance", methods=["POST"])
+def api_record_performance(project_id):
+    data = request.json or {}
+    try:
+        return jsonify(stage_record_performance(project_id, data))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/performance/report", methods=["GET"])
+def api_weekly_report():
+    try:
+        return jsonify(stage_weekly_report())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/projects/<path:project_id>/render", methods=["POST"])
