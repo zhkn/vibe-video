@@ -447,9 +447,9 @@ function renderProject(data) {
     tk.innerHTML = '<div class="empty"><div class="icon">🎞️</div><div class="msg">尚未抽取关键帧</div></div>';
   }
 
-  // Contact sheets
+  // Contact sheets (tab may not exist if removed from UI)
   const tcs = document.getElementById('tc-contact-sheets');
-  tcs.innerHTML = '<div class="empty"><div class="icon">🖼️</div><div class="msg">运行视觉分析后自动生成</div></div>';
+  if (tcs) tcs.innerHTML = '<div class="empty"><div class="icon">🖼️</div><div class="msg">运行视觉分析后自动生成</div></div>';
 
   // Analysis / Shots
   const ta = document.getElementById('tc-analysis');
