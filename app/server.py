@@ -76,6 +76,44 @@ STORY_SLOTS = [
     {"role": "ending", "label": "收尾空镜", "desc": "留有余韵的结束"},
 ]
 
+VIDEO_TEMPLATES = {
+    "before_after": {
+        "name": "整理前后对比",
+        "desc": "素材中包含整理前、修剪动作、红桶收集、整理后全景",
+        "structure": ["opening", "space", "action_intro", "action", "collect", "result", "detail", "ending"],
+        "tone": "成就感、清爽",
+        "hook_strategy": "先放整理后成果，再回溯过程",
+    },
+    "garden_diary": {
+        "name": "花园日记",
+        "desc": "日常花园记录，多动作片段拼接",
+        "structure": ["opening", "space", "action", "life", "action", "detail", "ending"],
+        "tone": "轻松日常",
+        "hook_strategy": "最美的花或最有趣的动作",
+    },
+    "tutorial": {
+        "name": "种植/养护教程",
+        "desc": "有明确的教学内容，如栽种、修剪、施肥",
+        "structure": ["opening", "action_intro", "action", "action", "result", "detail", "ending"],
+        "tone": "实用、亲切",
+        "hook_strategy": "展示最终效果或关键步骤",
+    },
+    "healing_mood": {
+        "name": "治愈氛围片",
+        "desc": "画面极美、动作少，重在氛围营造",
+        "structure": ["opening", "space", "detail", "life", "detail", "ending"],
+        "tone": "安静、治愈",
+        "hook_strategy": "最美的空镜或特写",
+    },
+    "one_problem": {
+        "name": "一个问题解决型",
+        "desc": "发现问题 → 解决问题 → 结果",
+        "structure": ["opening", "space", "action_intro", "action", "collect", "result", "ending"],
+        "tone": "有悬念、有满足感",
+        "hook_strategy": "先展示问题或对比",
+    },
+}
+
 OUTPUT_SPEC = {
     "width": 1080,
     "height": 1920,
@@ -328,6 +366,7 @@ def get_project_data(project_id: str) -> dict:
         "keyframes": keyframes,
         "shots": shots_data,
         "analysis": analysis_data,
+        "video_template": load_json("video_template.json"),
         "transcription": load_json("transcription.json"),
         "story_script": load_json("story_script.json"),
         "edit_plan": load_json("edit_plan.json"),
@@ -773,6 +812,95 @@ def _role_to_use(role: str) -> str:
         "detail": "细节展示",
     }
     return mapping.get(role, "中段快切")
+
+
+def stage_select_template(project_id: str) -> dict:
+    """根据 shots 数据判断最适合的视频模板"""
+    date_dir = os.path.join(ROOT_DIR, project_id)
+
+    # 读取 shots
+    shots_path = os.path.join(date_dir, "shots.json")
+    shots = []
+    if os.path.exists(shots_path):
+        with open(shots_path, encoding="utf-8") as f:
+            shots = json.load(f).get("shots", [])
+    else:
+        analysis_path = os.path.join(date_dir, "analysis.json")
+        if os.path.exists(analysis_path):
+            with open(analysis_path, encoding="utf-8") as f:
+                shots = json.load(f)
+
+    if not shots:
+        return {"video_template": "one_problem", "template_name": "一个问题解决型", "reason": "无分析数据，默认模板"}
+
+    # 统计 shot_types 和 actions
+    all_types = []
+    all_actions = []
+    all_objects = []
+    beauty_scores = []
+    action_count = 0
+    has_before = False
+    has_after = False
+    has_core_action = False
+
+    for shot in shots:
+        if shot.get("delete"):
+            continue
+        all_types.extend(shot.get("shot_types", []))
+        all_actions.extend(shot.get("actions", []))
+        all_objects.extend(shot.get("garden_objects", []))
+
+        ps = shot.get("platform_scores", {})
+        beauty_scores.append(ps.get("beauty", 5))
+        if ps.get("action", 0) >= 6:
+            action_count += 1
+
+        # 检查前后对比特征
+        for t in shot.get("shot_types", []):
+            if "整理前" in t or "乱" in t:
+                has_before = True
+            if "整理后" in t or "成果" in t:
+                has_after = True
+            if "核心动作" in t or "修剪" in t or "整理中" in t:
+                has_core_action = True
+
+    avg_beauty = sum(beauty_scores) / max(len(beauty_scores), 1)
+    all_text = " ".join(all_types + all_actions + all_objects)
+
+    # 判断模板（按优先级）
+    if has_before and has_core_action and has_after:
+        template_key = "before_after"
+        reason = f"素材中包含整理前、核心动作、整理后，适合前后对比"
+    elif any(k in all_text for k in ["花苗", "种子", "栽种", "种植", "施肥", "浇水", "养护"]):
+        template_key = "tutorial"
+        reason = f"素材包含种植/养护相关内容，适合教程"
+    elif action_count >= 3:
+        template_key = "garden_diary"
+        reason = f"有 {action_count} 个动作片段，适合花园日记"
+    elif avg_beauty >= 8 and action_count <= 1:
+        template_key = "healing_mood"
+        reason = f"画面平均美感 {avg_beauty:.0f}/10 且动作少，适合治愈氛围片"
+    else:
+        template_key = "one_problem"
+        reason = f"默认使用问题解决型模板"
+
+    template = VIDEO_TEMPLATES[template_key]
+    result = {
+        "video_template": template_key,
+        "template_name": template["name"],
+        "reason": reason,
+        "structure": template["structure"],
+        "tone": template["tone"],
+        "hook_strategy": template["hook_strategy"],
+    }
+
+    # 保存
+    template_path = os.path.join(date_dir, "video_template.json")
+    with open(template_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    update_progress(project_id, "template_select", 100, f"模板选择: {template['name']}")
+    return result
 
 
 def _fallback_visual_analysis(project_id: str) -> list[dict]:
@@ -1667,6 +1795,10 @@ def run_full_pipeline(project_id: str, theme: str = "日常生活记录", target
         update_progress(project_id, "pipeline", 50, "音频转字幕...")
         results["stages"]["transcription"] = stage_transcription(project_id)
 
+        # Stage 5.5: 模板选择
+        update_progress(project_id, "pipeline", 55, "选择视频模板...")
+        results["stages"]["template_select"] = stage_select_template(project_id)
+
         # Stage 6: 故事脚本
         update_progress(project_id, "pipeline", 70, "生成剧情脚本...")
         results["stages"]["story_script"] = stage_story_script(project_id, theme, target_duration=target_duration)
@@ -1824,6 +1956,16 @@ def api_transcription(project_id):
     def run():
         try:
             return stage_transcription(project_id)
+        except Exception as e:
+            return {"error": str(e)}
+    return jsonify(run())
+
+
+@app.route("/api/projects/<path:project_id>/template-select", methods=["POST"])
+def api_template_select(project_id):
+    def run():
+        try:
+            return stage_select_template(project_id)
         except Exception as e:
             return {"error": str(e)}
     return jsonify(run())

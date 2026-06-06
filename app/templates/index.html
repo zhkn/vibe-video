@@ -403,13 +403,24 @@ function renderProject(data) {
 
   // Analysis / Shots
   const ta = document.getElementById('tc-analysis');
-  if (data.shots && data.shots.shots && data.shots.shots.length > 0) {
-    ta.innerHTML = renderShots(data.shots);
-  } else if (data.analysis && data.analysis.length > 0) {
-    ta.innerHTML = '<div class="json-view">' + syntaxHighlight(JSON.stringify(data.analysis, null, 2)) + '</div>';
-  } else {
-    ta.innerHTML = '<div class="empty"><div class="icon">👁️</div><div class="msg">尚未进行视觉分析</div></div>';
+  let analysisHtml = '';
+  if (data.video_template) {
+    const vt = data.video_template;
+    analysisHtml += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:14px;font-weight:600;color:var(--accent)">🎬 ${esc(vt.template_name || '?')}</span>
+      <span style="font-size:12px;color:var(--text2)">${esc(vt.reason || '')}</span>
+      <span style="font-size:12px;color:var(--accent3)">🎯 ${esc(vt.hook_strategy || '')}</span>
+      <span style="font-size:12px;color:var(--text2)">🎵 ${esc(vt.tone || '')}</span>
+    </div>`;
   }
+  if (data.shots && data.shots.shots && data.shots.shots.length > 0) {
+    analysisHtml += renderShots(data.shots);
+  } else if (data.analysis && data.analysis.length > 0) {
+    analysisHtml += '<div class="json-view">' + syntaxHighlight(JSON.stringify(data.analysis, null, 2)) + '</div>';
+  } else {
+    analysisHtml += '<div class="empty"><div class="icon">👁️</div><div class="msg">尚未进行视觉分析</div></div>';
+  }
+  ta.innerHTML = analysisHtml;
 
   // Transcription
   const tt = document.getElementById('tc-transcription');
