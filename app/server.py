@@ -490,8 +490,8 @@ def stage_keyframes(project_id: str, fps_interval: float = 2.0, scene_thresh: fl
 # Stage 3: 生成 Contact Sheet
 # ═══════════════════════════════════════════════════════════
 
-def stage_contact_sheets(project_id: str, max_frames: int = 30) -> dict:
-    """把关键帧拼成 contact sheet"""
+def stage_contact_sheets(project_id: str, max_frames: int = 30, fps_interval: float = 2.0) -> dict:
+    """把关键帧拼成 contact sheet，带时间索引叠加"""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -504,6 +504,15 @@ def stage_contact_sheets(project_id: str, max_frames: int = 30) -> dict:
 
     cs_dir = ensure_dir(date_dir, "contact_sheets")
     sheets = []
+    frame_index = []  # frame_index.json
+
+    # 尝试加载字体
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 16)
+        font_small = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 12)
+    except:
+        font = ImageFont.load_default()
+        font_small = font
 
     for sub in ["fixed", "scene"]:
         sub_dir = os.path.join(kf_dir, sub)
@@ -516,8 +525,10 @@ def stage_contact_sheets(project_id: str, max_frames: int = 30) -> dict:
         # 取均匀采样的帧
         if len(frames) > max_frames:
             step = len(frames) / max_frames
-            frames = [frames[int(i * step)] for i in range(max_frames)]
+            sampled_indices = [int(i * step) for i in range(max_frames)]
+            frames = [frames[idx] for idx in sampled_indices]
         else:
+            sampled_indices = list(range(len(frames)))
             frames = frames[:max_frames]
 
         n = len(frames)
@@ -537,8 +548,54 @@ def stage_contact_sheets(project_id: str, max_frames: int = 30) -> dict:
                 ox = x + (thumb_w - img.width) // 2
                 oy = y + (thumb_h - img.height) // 2
                 sheet.paste(img, (ox, oy))
-                # 编号标签
-                draw.text((x + 5, y + 5), f"#{i+1}", fill=(255, 200, 0))
+
+                # 解析帧文件名: {base}_{0001}.jpg
+                fname = os.path.basename(fp)
+                base_parts = fname.rsplit("_", 1)
+                source_base = base_parts[0] if len(base_parts) > 1 else "unknown"
+                frame_num_str = base_parts[1].split(".")[0] if len(base_parts) > 1 else "0"
+                try:
+                    frame_num = int(frame_num_str)
+                except ValueError:
+                    frame_num = i + 1
+
+                # 计算时间戳
+                if sub == "fixed":
+                    timestamp = (frame_num - 1) * fps_interval
+                else:
+                    # scene 帧没有固定时间间隔，用帧号估算
+                    timestamp = frame_num * fps_interval
+
+                # 显示：视频编号 + 时间戳 + 帧编号
+                ts_str = f"{int(timestamp//60):02d}:{timestamp%60:04.1f}"
+                label = f"{source_base} {ts_str} #{frame_num}"
+
+                # 标签背景
+                label_bbox = draw.textbbox((x + 5, y + 5), label, font=font_small)
+                draw.rectangle([label_bbox[0]-2, label_bbox[1]-2, label_bbox[2]+2, label_bbox[3]+2],
+                              fill=(0, 0, 0, 180))
+                draw.text((x + 5, y + 5), label, fill=(255, 200, 0), font=font_small)
+
+                # 帧编号大字（右下角）
+                num_text = f"#{i+1}"
+                num_bbox = draw.textbbox((0, 0), num_text, font=font)
+                nw = num_bbox[2] - num_bbox[0]
+                nh = num_bbox[3] - num_bbox[1]
+                draw.rectangle([x + thumb_w - nw - 12, y + thumb_h - nh - 10,
+                               x + thumb_w - 4, y + thumb_h - 4], fill=(0, 0, 0, 180))
+                draw.text((x + thumb_w - nw - 8, y + thumb_h - nh - 6), num_text,
+                         fill=(255, 255, 255), font=font)
+
+                # 记录 frame_index
+                frame_index.append({
+                    "frame_id": f"{source_base}_{frame_num_str}",
+                    "source": f"{source_base}.MP4" if not source_base.endswith((".MP4", ".mp4", ".MOV", ".mov")) else source_base,
+                    "timestamp": round(timestamp, 1),
+                    "sheet": f"{sub}_sheet.jpg",
+                    "grid_position": [i // cols, i % cols],
+                    "grid_index": i,
+                })
+
             except Exception as e:
                 print(f"  无法打开帧 {fp}: {e}")
 
@@ -547,7 +604,12 @@ def stage_contact_sheets(project_id: str, max_frames: int = 30) -> dict:
         sheets.append({"type": sub, "path": sheet_path, "frame_count": n})
         print(f"  Contact sheet: {sub}_sheet.jpg ({n} 帧)")
 
-    return {"sheets": sheets}
+    # 保存 frame_index.json
+    index_path = os.path.join(date_dir, "frame_index.json")
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump(frame_index, f, ensure_ascii=False, indent=2)
+
+    return {"sheets": sheets, "frame_index_count": len(frame_index)}
 
 
 # ═══════════════════════════════════════════════════════════
