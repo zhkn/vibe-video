@@ -4,14 +4,15 @@
 端到端自动化视频剪辑工作流，专为花园/生活场景设计。将 iPhone 视频自动分析、生成剧本、渲染为 TikTok/抖音竖屏短视频。
 
 ## 技术栈
-- **后端**: Flask (单文件 app/server.py, ~1800 行)
-- **前端**: 暗色主题 SPA (app/templates/index.html, ~820 行)
+- **后端**: Flask (单文件 app/server.py, ~2700 行)
+- **前端**: 暗色主题 SPA (app/templates/index.html, ~1050 行)
 - **AI 模型**: mimo-v2.5 (视觉分析), mimo-v2.5-pro (文本生成), Whisper (语音转字幕)
 - **视频处理**: ffmpeg/ffprobe
 - **图片处理**: Pillow (Contact Sheet 拼图)
+- **数据校验**: Pydantic v2 (shots 结构校验)
 
 ## 关键目录
-- `app/server.py` — Flask 后端，包含 8 阶段 Pipeline 和所有 API
+- `app/server.py` — Flask 后端，包含 10 阶段 Pipeline 和所有 API
 - `app/templates/index.html` — Web UI 前端，SSE 实时进度
 - `scripts/` — 启动脚本和 MVP 版本
 - `docs/` — 架构文档、API 文档、开发日志
@@ -26,25 +27,52 @@
         ├── raw/              # 原始视频
         ├── keyframes/        # 抽取的关键帧
         ├── audio/            # 提取的音频
-        ├── outputs/          # 输出文件 (rough_cut.mp4, cover.jpg, captions.srt)
-        ├── meta.json         # 主题元数据 (主题名、slug、创建时间)
-        ├── analysis.json
-        ├── story_script.json
-        └── edit_plan.json
+        ├── outputs/          # 输出文件 (rough_cut.mp4, draft_cut.mp4, cover.jpg, captions.srt)
+        ├── meta.json         # 主题元数据
+        ├── shots.json        # 片段级分析 (替代 analysis.json)
+        ├── analysis.json     # 向后兼容的扁平化分析
+        ├── frame_index.json  # 关键帧时间索引
+        ├── video_template.json # 视频模板选择
+        ├── story_script.json # 剧情脚本
+        ├── edit_plan.json    # 编辑计划 (含剪辑意图)
+        ├── publish_pack.json # 发布包 (标题/封面/话题/平台备注)
+        └── performance.json  # 发布后数据反馈
 ```
 
 **project_id 格式**: `YYYY-MM-DD/<topic-slug>` (如 `2026-06-05/garden-trimming`)
 **旧格式兼容**: 也支持 `YYYY-MM-DD` 直接作为 project_id (目录下直接有 raw/)
 
-## 8 阶段 Pipeline
+## 10 阶段 Pipeline
 1. 视频导入 (ffprobe 按日期归档)
 2. 关键帧抽取 (ffmpeg 固定间隔 + 场景变化)
-3. Contact Sheet (Pillow 拼图)
-4. 视觉分析 (mimo-v2.5 多模态)
+3. Contact Sheet + 时间索引 (Pillow 拼图 + frame_index.json)
+4. 片段级视觉分析 (mimo-v2.5 多模态 → shots.json, Pydantic 校验)
 5. 音频转字幕 (Whisper)
-6. 剧情脚本 (mimo-v2.5-pro)
-7. 编辑计划 (Python 从脚本生成)
-8. 视频渲染 (ffmpeg 裁剪拼接 + 字幕烧录)
+5.5. 视频模板选择 (before_after/garden_diary/tutorial/healing_mood/one_problem)
+6. 剧情脚本 (mimo-v2.5-pro, 按推荐用途分组)
+7. 编辑计划 (含剪辑意图: why_selected/platform_goal/risk/edit_style)
+8. 视频渲染 (草稿模式 720p / 发布模式 1080p)
+9. 发布包 (标题候选/封面文字/话题标签/评论引导/平台备注)
+10. 发布后反馈 (performance.json + 周报分析)
+
+## 平台化评分 (8 维)
+- hook: 前3秒吸引力 (权重 0.18)
+- retention: 维持停留能力 (0.18)
+- action: 动作变化丰富度 (0.16)
+- story_value: 故事推进价值 (0.16)
+- beauty: 画面美感 (0.12)
+- clarity: 一眼看懂程度 (0.10)
+- contrast: 前后变化对比 (0.07)
+- cover_value: 封面适合度 (0.03)
+
+## 5 种视频模板
+| 模板 | 适用场景 | 结构 |
+|------|---------|------|
+| before_after | 整理前后对比 | opening→space→action_intro→action→collect→result→detail→ending |
+| garden_diary | 花园日记 | opening→space→action→life→action→detail→ending |
+| tutorial | 种植/养护教程 | opening→action_intro→action→action→result→detail→ending |
+| healing_mood | 治愈氛围片 | opening→space→detail→life→detail→ending |
+| one_problem | 一个问题解决型 | opening→space→action_intro→action→collect→result→ending |
 
 ## 常用命令
 ```bash
@@ -65,10 +93,12 @@ make lint
 - Whisper 默认使用本地 base 模型
 - 视觉分析: mimo-v2.5, 文本生成: mimo-v2.5-pro
 - 默认端口: 8766
-- 输出格式: 9:16 竖屏, 720x1280
+- 输出格式: 9:16 竖屏, 1080x1920 (发布) / 720x1280 (草稿)
 
 ## 代码规范
 - Python 3.10+, 使用 type hints
 - 中文注释和文档
 - 单文件架构 (server.py), 不过度拆分
 - 前端纯 HTML/CSS/JS, 无框架依赖
+- Pydantic 校验 AI 输出结构
+- 每次修改完成后自动 git commit
