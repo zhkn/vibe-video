@@ -372,9 +372,68 @@ fallback                 — _fallback_visual_analysis() 生成默认值
 | 8 | `detail` | 细节特写 | 精致细节 |
 | 9 | `ending` | 收尾空镜 | 留有余韵的结束 |
 
-## 9. 安全设计
+## 9. 安全与可靠性设计
 
-- **文件访问控制**：`/api/file/<path>` 端点检查路径必须在 `ROOT_DIR` 下
+### 9.1 路径安全
+
+所有文件服务 API 共用集中路径校验：
+
+```python
+def resolve_project_dir(project_id: str) -> str:
+    """normpath + startswith 双重校验，防止 ../ 路径穿越"""
+
+def resolve_file_path(project_id: str, sub_dir: str, filename: str) -> str:
+    """文件名不能含路径分隔符，最终路径必须在允许的子目录下"""
+```
+
+覆盖的端点：`/api/video`、`/api/keyframe`、`/api/contact-sheet`、`/api/output`、`/api/file`
+
+### 9.2 并发控制
+
+项目级锁防止同一项目并发执行 pipeline 或渲染：
+
+```python
+project_locks: dict[str, threading.Lock] = {}
+
+# full-pipeline 和 render 端点使用
+if not acquire_project_lock(project_id):
+    return error_response("PIPELINE_RUNNING", "...", status=409)
+```
+
+- 冲突返回 `409 Conflict`
+- `finally` 块确保释放锁
+- `job_status.json` 落盘，服务重启后可查
+
+### 9.3 统一错误响应
+
+```json
+{
+  "error": {
+    "code": "PIPELINE_RUNNING",
+    "message": "项目 xxx 正在处理中",
+    "stage": "pipeline",
+    "retryable": false
+  }
+}
+```
+
+| HTTP 状态码 | 场景 |
+|------------|------|
+| 400 | 参数错误 / 非法 project_id |
+| 404 | 项目不存在 / 文件不存在 |
+| 409 | 项目正在处理中 |
+| 422 | AI 输出校验失败 |
+| 403 | 路径越界 |
+| 500 | 内部错误 |
+
+### 9.4 渲染 concat 校验
+
+concat 前对所有临时片段跑 `ffprobe -show_streams` 校验一致性：
+- width / height / r_frame_rate / codec_name / pix_fmt / sample_rate
+- 不一致的片段自动重新转码后再 concat
+
+### 9.5 其他安全措施
+
 - **XSS 防护**：前端 `esc()` 函数转义 HTML 特殊字符
-- **原子写入**：`atomic_write_json()` 先写临时文件再 rename，避免写入中断导致数据损坏
+- **原子写入**：`atomic_write_json()` 先写临时文件再 rename
 - **超时保护**：subprocess 调用默认 600 秒超时，ffprobe 10 秒超时
